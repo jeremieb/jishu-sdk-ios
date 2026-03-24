@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		02397E792F7306DC00D46ACD /* Jishu in Frameworks */ = {isa = PBXBuildFile; productRef = 02397E782F7306DC00D46ACD /* Jishu */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		02397E602F73036200D46ACD /* App Example.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "App Example.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -23,6 +27,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				02397E792F7306DC00D46ACD /* Jishu in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -65,6 +70,7 @@
 			);
 			name = "App Example";
 			packageProductDependencies = (
+				02397E782F7306DC00D46ACD /* Jishu */,
 			);
 			productName = "App Example";
 			productReference = 02397E602F73036200D46ACD /* App Example.app */;
@@ -94,6 +100,9 @@
 			);
 			mainGroup = 02397E572F73036200D46ACD;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				02397E772F7306DC00D46ACD /* XCLocalSwiftPackageReference "../../jishu-sdk-ios" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 02397E612F73036200D46ACD /* Products */;
 			projectDirPath = "";
@@ -256,6 +265,7 @@
 				DEVELOPMENT_TEAM = PNJ2ZGDY4C;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Jishu Example App";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -288,6 +298,7 @@
 				DEVELOPMENT_TEAM = PNJ2ZGDY4C;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Jishu Example App";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -332,6 +343,20 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		02397E772F7306DC00D46ACD /* XCLocalSwiftPackageReference "../../jishu-sdk-ios" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "../../jishu-sdk-ios";
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		02397E782F7306DC00D46ACD /* Jishu */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Jishu;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 02397E582F73036200D46ACD /* Project object */;
 }

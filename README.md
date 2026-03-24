@@ -1,5 +1,7 @@
 # Jishu iOS SDK
 
+![github package](https://github.com/user-attachments/assets/161cb128-4312-4dd2-b69c-a47698ee8096)
+
 A lightweight Swift package that checks [Jishu](https://jishu.page) promo access from iOS apps, with an optional bridge for RevenueCat entitlements.
 
 - **Current version:** `1.0.0`
