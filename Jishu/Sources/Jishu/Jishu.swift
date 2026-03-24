@@ -4,6 +4,9 @@ import Foundation
 ///
 /// Call `configure(baseURL:apiToken:appId:)` once at app startup before using any other API.
 public enum Jishu {
+    /// The current SDK version.
+    public static let version = "1.0.0"
+
     private nonisolated(unsafe) static var _configuration: JishuConfiguration?
     private nonisolated(unsafe) static var _client: JishuClient?
     private static let _cache = AccessCache()
