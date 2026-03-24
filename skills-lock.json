@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "swift-package-manager": {
+      "source": "nonameplum/agent-skills",
+      "sourceType": "github",
+      "computedHash": "affe24a9e37b7e07cc23ff1cce7b760a843c16103107df1d3ca5399483814aa9"
+    }
+  }
+}
