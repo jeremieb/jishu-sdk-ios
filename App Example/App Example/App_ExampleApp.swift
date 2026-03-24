@@ -1,23 +1,24 @@
+//
+//  App_ExampleApp.swift
+//  App Example
+//
+//  Created by Jeremie Berduck on 24/3/26.
+//
+
 import SwiftUI
 import Jishu
 
 @main
 struct App_ExampleApp: App {
+    
     init() {
-        guard let configuration = AppConfiguration.load() else {
-            assertionFailure(
-                "Missing Jishu configuration. Set JISHU_BASE_URL, JISHU_API_TOKEN and JISHU_APP_ID in environment variables or Info.plist."
-            )
-            return
-        }
-
         Jishu.configure(
-            baseURL: configuration.baseURL,
-            apiToken: configuration.apiToken,
-            appId: configuration.appID
+            baseURL: URL(string: "https://staging.jishu.page")!,
+            apiToken: "YOUR_API_TOKEN",
+            appId: "YOUR_APP_ID"
         )
     }
-
+    
     var body: some Scene {
         WindowGroup {
             ContentView()
