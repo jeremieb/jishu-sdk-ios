@@ -22,8 +22,8 @@ struct JishuClient: Sendable {
         return try await perform(request, retriesLeft: 1)
     }
 
-    func sendContactMessage(_ message: ContactMessage, appId: String) async throws {
-        let request = try buildContactRequest(message: message, appId: appId)
+    func sendContactMessage(_ message: ContactMessage, appId: String, displayUserID: String) async throws {
+        let request = try buildContactRequest(message: message, appId: appId, displayUserID: displayUserID)
         try await performContact(request, retriesLeft: 1)
     }
 
@@ -126,7 +126,7 @@ struct JishuClient: Sendable {
         }
     }
 
-    private func buildContactRequest(message: ContactMessage, appId: String) throws -> URLRequest {
+    private func buildContactRequest(message: ContactMessage, appId: String, displayUserID: String) throws -> URLRequest {
         guard var components = URLComponents(url: configuration.baseURL, resolvingAgainstBaseURL: false) else {
             throw JishuError.invalidBaseURL
         }
@@ -142,7 +142,8 @@ struct JishuClient: Sendable {
             senderName: message.senderName,
             senderEmail: message.senderEmail,
             subject: message.subject,
-            body: message.body
+            body: message.body,
+            userId: message.userId ?? displayUserID
         )
         request.httpBody = try JSONEncoder().encode(body)
         return request
@@ -193,4 +194,5 @@ private struct ContactMessageBody: Encodable {
     let senderEmail: String
     let subject: String?
     let body: String
+    let userId: String?
 }

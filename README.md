@@ -2,7 +2,7 @@
 
 ![github package](https://github.com/user-attachments/assets/161cb128-4312-4dd2-b69c-a47698ee8096)
 
-A lightweight Swift package that checks [Jishu](https://jishu.page) promo access from iOS apps, with an optional bridge for RevenueCat entitlements.
+A lightweight Swift package for [Jishu](https://jishu.page) — check promo access grants and send contact form messages from iOS apps.
 
 - **Current version:** `1.0.0`
 - **Minimum platform:** iOS 15
@@ -15,13 +15,14 @@ A lightweight Swift package that checks [Jishu](https://jishu.page) promo access
 1. [What is Jishu promo access?](#what-is-jishu-promo-access)
 2. [Installation](#installation)
 3. [Quickstart](#quickstart)
-4. [User identity and `displayUserID`](#user-identity-and-displayuserid)
-5. [Staging smoke test](#staging-smoke-test)
-6. [RevenueCat integration](#revenuecat-integration)
-7. [Reinstall limitation](#reinstall-limitation)
-8. [Security notes](#security-notes)
-9. [Publishing a new version](#publishing-a-new-version)
-10. [Running the tests](#running-the-tests)
+4. [Contact form](#contact-form)
+5. [User identity and `displayUserID`](#user-identity-and-displayuserid)
+6. [Staging smoke test](#staging-smoke-test)
+7. [RevenueCat integration](#revenuecat-integration)
+8. [Reinstall limitation](#reinstall-limitation)
+9. [Security notes](#security-notes)
+10. [Publishing a new version](#publishing-a-new-version)
+11. [Running the tests](#running-the-tests)
 
 ---
 
@@ -114,6 +115,112 @@ let result = try await Jishu.checkAccess(externalUserId: currentUser.id)
 
 ---
 
+## Contact form
+
+`Jishu.sendContactMessage(_:)` lets your users send a message directly to you from within your app. Messages land in the **User Messages** inbox in your Jishu dashboard, where you can read and reply via email.
+
+### Basic usage
+
+```swift
+do {
+    try await Jishu.sendContactMessage(ContactMessage(
+        senderEmail: "jane@example.com",
+        body: "Hi, I have a question about my account."
+    ))
+    // Show a "Message sent!" confirmation
+} catch JishuError.httpError(429) {
+    // Rate limit hit — ask the user to wait before trying again
+} catch {
+    // Network error or validation failure
+}
+```
+
+### `ContactMessage` fields
+
+| Field | Type | Required | Notes |
+|-------|------|----------|-------|
+| `senderEmail` | `String` | Yes | Must be a valid email address |
+| `body` | `String` | Yes | Max 5 000 characters |
+| `senderName` | `String?` | No | Displayed in the dashboard message list |
+| `subject` | `String?` | No | Shown as the message subject line |
+| `userId` | `String?` | No | Automatically filled with `Jishu.displayUserID` when `nil`. Lets the app owner add this sender to a promo grant directly from the dashboard. |
+
+```swift
+// All fields
+let message = ContactMessage(
+    senderName: "Jane Smith",
+    senderEmail: "jane@example.com",
+    subject: "Question about my portfolio",
+    body: "I noticed that my site is not loading correctly on Safari..."
+    // userId is automatically filled with Jishu.displayUserID
+)
+try await Jishu.sendContactMessage(message)
+```
+
+### Rate limiting
+
+The endpoint is public (no API token required) and rate-limited to **10 messages per hour per IP address** per app. On limit hit, `JishuError.httpError(429)` is thrown. Show a user-friendly message and do not retry automatically.
+
+### Errors
+
+| Error | Meaning |
+|-------|---------|
+| `JishuError.notConfigured` | `Jishu.configure(...)` was not called before sending |
+| `JishuError.httpError(400)` | Validation failed (missing email or body, value too long) |
+| `JishuError.httpError(404)` | The `appId` supplied to `configure` does not exist or is inactive |
+| `JishuError.httpError(429)` | Rate limit — more than 10 messages/hour from this IP |
+| `JishuError.httpError(500)` | Server error — the SDK retries once automatically |
+
+### SwiftUI example
+
+```swift
+struct ContactFormView: View {
+    @State private var email = ""
+    @State private var body  = ""
+    @State private var state: FormState = .idle
+
+    enum FormState { case idle, sending, success, error(String) }
+
+    var body: some View {
+        Form {
+            TextField("Your email", text: $email)
+                .keyboardType(.emailAddress)
+            TextEditor(text: $body)
+                .frame(minHeight: 120)
+        }
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Send") { send() }
+                    .disabled(email.isEmpty || body.isEmpty || state == .sending)
+            }
+        }
+        .overlay {
+            if case .success = state {
+                Text("Message sent!").foregroundStyle(.green)
+            }
+        }
+    }
+
+    private func send() {
+        state = .sending
+        Task {
+            do {
+                try await Jishu.sendContactMessage(
+                    ContactMessage(senderEmail: email, body: body)
+                )
+                state = .success
+            } catch JishuError.httpError(429) {
+                state = .error("Too many messages — please wait an hour and try again.")
+            } catch {
+                state = .error("Could not send message. Please try again.")
+            }
+        }
+    }
+}
+```
+
+---
+
 ## User identity and `displayUserID`
 
 `Jishu.displayUserID` is a stable, device-scoped identifier automatically generated on first launch and persisted in `UserDefaults`. You can use it as a device identity in the Jishu dashboard.
@@ -130,6 +237,18 @@ print(Jishu.displayUserID) // e.g. "550E8400-E29B-41D4-A716-446655440000"
 | Unauthenticated app or guest mode | Omit `externalUserId`; the SDK sends `displayUserID` automatically |
 
 Grants are matched on the server side against whichever identity you send. Mixing both identities in different calls for the same user can produce inconsistent results.
+
+**`displayUserID` and contact messages:**
+
+When a user submits a contact form, the SDK automatically includes their `displayUserID` as the `userId` field of the message. This lets you see the sender's Jishu identity directly in the **User Messages** dashboard and add them to a promo grant with one click — no copy-pasting required. If your app has its own auth system, pass an explicit `userId` to `ContactMessage` to use your stable user ID instead:
+
+```swift
+try await Jishu.sendContactMessage(ContactMessage(
+    senderEmail: "jane@example.com",
+    body: "Hi, I have a question.",
+    userId: currentUser.id   // override with your own stable ID
+))
+```
 
 ---
 
@@ -266,7 +385,7 @@ cd Jishu
 swift test
 ```
 
-All 15 tests should pass. The test suite covers:
+All tests should pass. The test suite covers:
 
 | Suite | What it tests |
 |---|---|
@@ -274,6 +393,7 @@ All 15 tests should pass. The test suite covers:
 | `AccessResult decoding` | Full response, `matchType: none`, null fields, ISO 8601 dates |
 | `AccessCache` | Cache hit/miss, negative result exclusion, expiry, 5-minute cap |
 | `JishuClient` | 200 success, 401 no-retry, 500 retry, retry-then-succeed, auth header |
+| `Contact` | 201/200 success, 429 error, 500 retry, correct URL and no auth header, body encoding |
 
 ### Testing in your Xcode project (local package)
 

@@ -62,7 +62,7 @@ public enum Jishu {
         guard let client = _client, let config = _configuration else {
             throw JishuError.notConfigured
         }
-        try await client.sendContactMessage(message, appId: config.appId)
+        try await client.sendContactMessage(message, appId: config.appId, displayUserID: DeviceIDStore.deviceID())
     }
 
     /// Check whether the current user or device has an active Jishu promo grant.

@@ -10,16 +10,22 @@ public struct ContactMessage: Sendable {
     public var subject: String?
     /// Message body. Must not be empty.
     public var body: String
+    /// Optional user identifier — the same ID you use for entitlement checks.
+    /// When `nil`, the SDK automatically fills in `Jishu.displayUserID` so the app
+    /// owner can add the sender directly to a promo grant from the dashboard.
+    public var userId: String?
 
     public init(
         senderName: String? = nil,
         senderEmail: String,
         subject: String? = nil,
-        body: String
+        body: String,
+        userId: String? = nil
     ) {
         self.senderName = senderName
         self.senderEmail = senderEmail
         self.subject = subject
         self.body = body
+        self.userId = userId
     }
 }
