@@ -51,6 +51,20 @@ public enum Jishu {
         DeviceIDStore.deviceID()
     }
 
+    /// Submit a contact message from the app user.
+    ///
+    /// The message is associated with the `appId` supplied to `configure(baseURL:apiToken:appId:)`.
+    /// No authentication is required — the endpoint is public and rate-limited by IP.
+    ///
+    /// - Parameter message: The contact message to send.
+    /// - Throws: `JishuError.notConfigured` if `configure` has not been called.
+    public static func sendContactMessage(_ message: ContactMessage) async throws {
+        guard let client = _client, let config = _configuration else {
+            throw JishuError.notConfigured
+        }
+        try await client.sendContactMessage(message, appId: config.appId)
+    }
+
     /// Check whether the current user or device has an active Jishu promo grant.
     ///
     /// - Parameter externalUserId: Stable ID from your own auth system. Pass `nil` to fall back

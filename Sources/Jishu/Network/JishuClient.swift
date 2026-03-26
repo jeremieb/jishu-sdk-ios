@@ -22,6 +22,11 @@ struct JishuClient: Sendable {
         return try await perform(request, retriesLeft: 1)
     }
 
+    func sendContactMessage(_ message: ContactMessage, appId: String) async throws {
+        let request = try buildContactRequest(message: message, appId: appId)
+        try await performContact(request, retriesLeft: 1)
+    }
+
     // MARK: - Private
 
     private func perform(_ request: URLRequest, retriesLeft: Int) async throws -> AccessResult {
@@ -89,6 +94,60 @@ struct JishuClient: Sendable {
         }
     }
 
+    private func performContact(_ request: URLRequest, retriesLeft: Int) async throws {
+        do {
+            let (_, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                throw JishuError.invalidBaseURL
+            }
+            logger.debug("Contact HTTP \(http.statusCode)")
+            switch http.statusCode {
+            case 200, 201:
+                return
+            case 400..<500:
+                throw JishuError.httpError(http.statusCode)
+            case 500...:
+                if retriesLeft > 0 {
+                    logger.debug("Retrying contact after \(http.statusCode)")
+                    return try await performContact(request, retriesLeft: retriesLeft - 1)
+                }
+                throw JishuError.httpError(http.statusCode)
+            default:
+                throw JishuError.httpError(http.statusCode)
+            }
+        } catch let error as JishuError {
+            throw error
+        } catch {
+            if retriesLeft > 0 {
+                logger.debug("Retrying contact after transport error: \(error.localizedDescription)")
+                return try await performContact(request, retriesLeft: retriesLeft - 1)
+            }
+            throw error
+        }
+    }
+
+    private func buildContactRequest(message: ContactMessage, appId: String) throws -> URLRequest {
+        guard var components = URLComponents(url: configuration.baseURL, resolvingAgainstBaseURL: false) else {
+            throw JishuError.invalidBaseURL
+        }
+        let encodedAppId = appId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? appId
+        components.path = "/api/apps/\(encodedAppId)/contact"
+        guard let url = components.url else {
+            throw JishuError.invalidBaseURL
+        }
+        var request = URLRequest(url: url, timeoutInterval: 10)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body = ContactMessageBody(
+            senderName: message.senderName,
+            senderEmail: message.senderEmail,
+            subject: message.subject,
+            body: message.body
+        )
+        request.httpBody = try JSONEncoder().encode(body)
+        return request
+    }
+
     private static let decoder: JSONDecoder = {
         let d = JSONDecoder()
         nonisolated(unsafe) let formatter = ISO8601DateFormatter()
@@ -106,7 +165,7 @@ struct JishuClient: Sendable {
     }()
 }
 
-// MARK: - Request body
+// MARK: - Request bodies
 
 private struct EntitlementCheckRequest: Encodable {
     let appId: String
@@ -127,4 +186,11 @@ private struct EntitlementCheckRequest: Encodable {
         try c.encodeIfPresent(externalUserId, forKey: .externalUserId)
         try c.encodeIfPresent(environment, forKey: .environment)
     }
+}
+
+private struct ContactMessageBody: Encodable {
+    let senderName: String?
+    let senderEmail: String
+    let subject: String?
+    let body: String
 }
