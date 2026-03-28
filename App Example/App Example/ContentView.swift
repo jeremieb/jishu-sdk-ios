@@ -1,98 +1,221 @@
-//
-//  ContentView.swift
-//  App Example
-//
-//  Created by Jeremie Berduck on 24/3/26.
-//
-
 import SwiftUI
 import Jishu
 
 struct ContentView: View {
-    
-    @State private var userID: String = Jishu.displayUserID
-    @State private var externalUserID: String = ""
-    @State private var isGranted: Bool = false
-    @State private var grantCheckMessage: String = "Run a grant check to see details."
-    @State private var isCheckingGrant: Bool = false
-    @State private var isShowingMessageSheet: Bool = false
-    
+    @StateObject private var viewModel = MainViewModel()
+
     var body: some View {
         VStack(spacing: 16) {
             GroupBox(label: Label("Jishu User ID", systemImage: "person.fill")) {
-                Text(userID)
+                Text(viewModel.userID)
                     .font(.footnote)
                     .textSelection(.enabled)
+
                 HStack {
-                    if isGranted {
+                    if viewModel.isGranted {
                         Text("Access premium granted")
-                            .foregroundStyle(Color.green)
+                            .foregroundStyle(.green)
                     } else {
                         Text("Access premium refused")
-                            .foregroundStyle(Color.red)
+                            .foregroundStyle(.red)
                     }
                 }
             }
 
             GroupBox(label: Label("Grant Check", systemImage: "checkmark.shield")) {
-                TextField("External User ID (optional)", text: $externalUserID)
+                TextField("External User ID (optional)", text: $viewModel.externalUserID)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
 
                 Button("Check Grant") {
-                    update()
+                    viewModel.checkGrant()
                 }
                 .buttonStyle(.bordered)
-                .disabled(isCheckingGrant)
+                .disabled(viewModel.isCheckingGrant)
 
-                Text(grantCheckMessage)
+                Text(viewModel.grantCheckMessage)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
             }
-            
-            Button("New Message") {
-                isShowingMessageSheet = true
+
+            HStack(spacing: 12) {
+                Button("New Message") {
+                    viewModel.isShowingMessageSheet = true
+                }
+                .buttonStyle(.borderedProminent)
+
+                Button("Feature Requests") {
+                    viewModel.isShowingFeedbackSheet = true
+                }
+                .buttonStyle(.bordered)
             }
-            .buttonStyle(.borderedProminent)
         }
         .padding()
         .onAppear {
-            update()
+            viewModel.checkGrant()
         }
-        .sheet(isPresented: $isShowingMessageSheet) {
+        .sheet(isPresented: $viewModel.isShowingMessageSheet) {
             ContactMessageSheet()
         }
+        .sheet(isPresented: $viewModel.isShowingFeedbackSheet) {
+            FeedbackSheet()
+        }
     }
-    
-    private func update() {
-        isCheckingGrant = true
-        let trimmedExternalUserID = externalUserID.trimmingCharacters(in: .whitespacesAndNewlines)
+}
 
-        Task {
-            do {
-                let result: AccessResult
+private struct FeedbackSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @StateObject private var viewModel = FeedbackViewModel()
 
-                if trimmedExternalUserID.isEmpty {
-                    result = try await Jishu.checkAccess()
+    var body: some View {
+        NavigationStack {
+            Group {
+                if viewModel.isLoading && viewModel.proposals.isEmpty {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let errorMessage = viewModel.errorMessage {
+                    VStack(spacing: 12) {
+                        Text(errorMessage)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+
+                        Button("Retry") {
+                            Task { await viewModel.load() }
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    .padding()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if viewModel.proposals.isEmpty {
+                    ContentUnavailableView(
+                        "No Feature Requests",
+                        systemImage: "lightbulb",
+                        description: Text("Be the first to suggest a feature.")
+                    )
                 } else {
-                    result = try await Jishu.checkAccess(externalUserId: trimmedExternalUserID)
+                    List(viewModel.proposals) { proposal in
+                        ProposalRow(
+                            proposal: proposal,
+                            hasVoted: viewModel.votedIds.contains(proposal.id)
+                        ) {
+                            Task { await viewModel.vote(on: proposal) }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Feature Requests")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        viewModel.isShowingSubmitSheet = true
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                }
+            }
+            .task { await viewModel.load() }
+            .sheet(isPresented: $viewModel.isShowingSubmitSheet) {
+                SubmitProposalSheet { proposal in
+                    viewModel.didSubmitProposal(proposal)
+                }
+            }
+        }
+    }
+}
+
+private struct ProposalRow: View {
+    let proposal: JishuProposal
+    let hasVoted: Bool
+    let onVote: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Button(action: onVote) {
+                VStack(spacing: 2) {
+                    Image(systemName: hasVoted ? "chevron.up.circle.fill" : "chevron.up.circle")
+                        .font(.title2)
+                        .foregroundStyle(hasVoted ? Color.accentColor : Color.secondary)
+                    Text("\(proposal.voteCount)")
+                        .font(.caption.bold())
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .buttonStyle(.plain)
+            .frame(width: 44)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(proposal.title)
+                    .font(.headline)
+
+                if let description = proposal.description, !description.isEmpty {
+                    Text(description)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
                 }
 
-                await MainActor.run {
-                    isGranted = result.granted
-                    isCheckingGrant = false
-                    grantCheckMessage = """
-                    Granted: \(result.granted)
-                    Identity used: \(trimmedExternalUserID.isEmpty ? "displayUserID (\(userID))" : "externalUserId (\(trimmedExternalUserID))")
-                    """
+                Text(proposal.formattedCreatedAt)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+private struct SubmitProposalSheet: View {
+    let onSubmitted: (JishuProposal) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @StateObject private var viewModel = SubmitProposalViewModel()
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Short title", text: $viewModel.title)
+                    TextField("Description (optional)", text: $viewModel.description, axis: .vertical)
+                        .lineLimit(4, reservesSpace: true)
+                } footer: {
+                    Text("Describe the feature you'd like to see. Keep the title concise.")
                 }
-            } catch {
-                print("‼️ Jishu checkAccess failed: \(error)")
-                await MainActor.run {
-                    isGranted = false
-                    isCheckingGrant = false
-                    grantCheckMessage = "Grant check failed: \(error.localizedDescription)"
+
+                if case .error(let message) = viewModel.status {
+                    Section {
+                        Text(message)
+                            .foregroundStyle(.red)
+                            .font(.footnote)
+                    }
+                }
+            }
+            .navigationTitle("New Feature Request")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    if viewModel.status == .sending {
+                        ProgressView()
+                    } else {
+                        Button("Submit") {
+                            Task {
+                                do {
+                                    let proposal = try await viewModel.submit()
+                                    onSubmitted(proposal)
+                                    dismiss()
+                                } catch {
+                                    // Error state already handled in the view model.
+                                }
+                            }
+                        }
+                        .disabled(!viewModel.canSubmit)
+                    }
                 }
             }
         }
@@ -101,45 +224,33 @@ struct ContentView: View {
 
 private struct ContactMessageSheet: View {
     @Environment(\.dismiss) private var dismiss
-    
-    @State private var senderName: String = ""
-    @State private var senderEmail: String = ""
-    @State private var subject: String = ""
-    @State private var bodyText: String = ""
-    @State private var status: FormStatus = .idle
-    
-    private enum FormStatus: Equatable {
-        case idle
-        case sending
-        case success
-        case error(String)
-    }
-    
+    @StateObject private var viewModel = ContactMessageViewModel()
+
     var body: some View {
         NavigationStack {
             Form {
                 Section("Sender") {
-                    TextField("Your name (optional)", text: $senderName)
-                    TextField("Your email", text: $senderEmail)
+                    TextField("Your name (optional)", text: $viewModel.senderName)
+                    TextField("Your email", text: $viewModel.senderEmail)
                         .keyboardType(.emailAddress)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                 }
-                
+
                 Section("Message") {
-                    TextField("Subject (optional)", text: $subject)
-                    TextEditor(text: $bodyText)
+                    TextField("Subject (optional)", text: $viewModel.subject)
+                    TextEditor(text: $viewModel.bodyText)
                         .frame(minHeight: 140)
                 }
-                
-                if case .error(let message) = status {
+
+                if case .error(let message) = viewModel.status {
                     Section {
                         Text(message)
                             .foregroundStyle(.red)
                     }
                 }
-                
-                if case .success = status {
+
+                if case .success = viewModel.status {
                     Section {
                         Text("Message sent successfully.")
                             .foregroundStyle(.green)
@@ -153,62 +264,21 @@ private struct ContactMessageSheet: View {
                         dismiss()
                     }
                 }
-                
+
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Send") {
-                        sendMessage()
+                        Task {
+                            await viewModel.sendMessage()
+                            if case .success = viewModel.status {
+                                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                                dismiss()
+                            }
+                        }
                     }
-                    .disabled(!canSend)
+                    .disabled(!viewModel.canSend)
                 }
             }
         }
-    }
-    
-    private var canSend: Bool {
-        !senderEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-        !bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-        status != .sending
-    }
-    
-    private func sendMessage() {
-        status = .sending
-        
-        let message = ContactMessage(
-            senderName: senderName.nilIfBlank,
-            senderEmail: senderEmail.trimmingCharacters(in: .whitespacesAndNewlines),
-            subject: subject.nilIfBlank,
-            body: bodyText.trimmingCharacters(in: .whitespacesAndNewlines)
-        )
-        
-        Task {
-            do {
-                try await Jishu.sendContactMessage(message)
-                await MainActor.run {
-                    status = .success
-                }
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
-                await MainActor.run {
-                    dismiss()
-                }
-            } catch JishuError.httpError(429) {
-                print("⚠️ Jishu sendContactMessage failed with 429 (rate limit).")
-                await MainActor.run {
-                    status = .error("Too many messages. Please try again later.")
-                }
-            } catch {
-                print("‼️ Jishu sendContactMessage failed: \(error)")
-                await MainActor.run {
-                    status = .error("Could not send the message. Please try again. (\(error.localizedDescription))")
-                }
-            }
-        }
-    }
-}
-
-private extension String {
-    var nilIfBlank: String? {
-        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
     }
 }
 

@@ -2,7 +2,7 @@
 
 ![github package](https://github.com/user-attachments/assets/161cb128-4312-4dd2-b69c-a47698ee8096)
 
-A lightweight Swift package for [Jishu](https://jishu.page) — check promo access grants and send contact form messages from iOS apps.
+A lightweight Swift package for [Jishu](https://jishu.page) — check promo access grants, send contact form messages, and collect feature proposals from iOS apps.
 
 - **Current version:** `1.0.0`
 - **Minimum platform:** iOS 15
@@ -16,13 +16,14 @@ A lightweight Swift package for [Jishu](https://jishu.page) — check promo acce
 2. [Installation](#installation)
 3. [Quickstart](#quickstart)
 4. [Contact form](#contact-form)
-5. [User identity and `displayUserID`](#user-identity-and-displayuserid)
-6. [Staging smoke test](#staging-smoke-test)
-7. [RevenueCat integration](#revenuecat-integration)
-8. [Reinstall limitation](#reinstall-limitation)
-9. [Security notes](#security-notes)
-10. [Publishing a new version](#publishing-a-new-version)
-11. [Running the tests](#running-the-tests)
+5. [Feature feedback](#feature-feedback)
+6. [User identity and `displayUserID`](#user-identity-and-displayuserid)
+7. [Staging smoke test](#staging-smoke-test)
+8. [RevenueCat integration](#revenuecat-integration)
+9. [Reinstall limitation](#reinstall-limitation)
+10. [Security notes](#security-notes)
+11. [Publishing a new version](#publishing-a-new-version)
+12. [Running the tests](#running-the-tests)
 
 ---
 
@@ -112,6 +113,12 @@ Pass your own user ID when the customer is signed in — this is the preferred m
 ```swift
 let result = try await Jishu.checkAccess(externalUserId: currentUser.id)
 ```
+
+### 3. Add feedback in your app
+
+Once the SDK is configured, you can call the public feedback endpoints from any `ObservableObject`, `ViewModel`, or other async context. The SDK automatically uses the configured `appId` and a stable device-scoped voter token.
+
+If you want to expose feature requests in your UI, see the [Feature feedback](#feature-feedback) section below for a complete example.
 
 ---
 
@@ -220,6 +227,126 @@ struct ContactFormView: View {
 ```
 
 ---
+
+## Feature feedback
+
+`Jishu.fetchProposals()`, `Jishu.submitProposal(...)`, and `Jishu.vote(on:)` wrap the public feedback endpoints for the configured app. No auth header is sent on these requests.
+
+### What you need before using it
+
+1. Call `Jishu.configure(...)` once at app startup.
+2. Use the same `appId` that is registered in your Jishu dashboard.
+3. Make sure the backend feedback routes are live for that app:
+   `GET /api/apps/:appId/proposals`
+   `POST /api/apps/:appId/proposals`
+   `POST /api/apps/:appId/proposals/:id/vote`
+
+### Basic usage
+
+```swift
+let proposals = try await Jishu.fetchProposals()
+
+let created = try await Jishu.submitProposal(
+    title: "Offline mode",
+    description: "Let me keep reading when I lose connection."
+)
+
+let updatedVoteCount = try await Jishu.vote(on: created)
+```
+
+### Typical app integration
+
+The simplest integration is:
+
+1. Load proposals when the screen opens with `Jishu.fetchProposals()`.
+2. Submit a new idea with `Jishu.submitProposal(title:description:)`.
+3. Update the vote count for an item with `Jishu.vote(on:)`.
+4. Store the result in your own screen state; the SDK does not manage UI state for you.
+
+### SwiftUI example
+
+```swift
+import Jishu
+import SwiftUI
+
+@MainActor
+final class FeedbackViewModel: ObservableObject {
+    @Published var proposals: [JishuProposal] = []
+    @Published var isLoading = false
+    @Published var errorMessage: String?
+
+    func load() async {
+        isLoading = true
+        defer { isLoading = false }
+
+        do {
+            proposals = try await Jishu.fetchProposals()
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func submit(title: String, description: String?) async {
+        do {
+            let proposal = try await Jishu.submitProposal(title: title, description: description)
+            proposals.insert(proposal, at: 0)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func vote(on proposal: JishuProposal) async {
+        do {
+            let updatedCount = try await Jishu.vote(on: proposal)
+            if let index = proposals.firstIndex(where: { $0.id == proposal.id }) {
+                proposals[index] = JishuProposal(
+                    id: proposal.id,
+                    title: proposal.title,
+                    description: proposal.description,
+                    status: proposal.status,
+                    voteCount: updatedCount,
+                    createdAt: proposal.createdAt
+                )
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+```
+
+### Public API
+
+```swift
+public static func fetchProposals() async throws -> [JishuProposal]
+public static func submitProposal(title: String, description: String?) async throws -> JishuProposal
+public static func vote(on proposal: JishuProposal) async throws -> Int
+```
+
+### Models
+
+| Type | Notes |
+|------|-------|
+| `JishuProposal` | `id`, `title`, `description`, `status`, `voteCount`, `createdAt` |
+| `JishuProposalStatus` | `open`, `planned`, `inProgress`, `shipped`, `rejected` |
+
+### Behavior notes
+
+- `submitProposal` and `vote(on:)` use a stable device-scoped voter token managed by the SDK.
+- The feedback endpoints are public and rate-limited by the backend.
+- Duplicate votes from the same device are ignored by the server.
+- The SDK retries once on transport failures or 5xx responses, matching the contact form behavior.
+
+### Common errors
+
+| Error | Meaning |
+|-------|---------|
+| `JishuError.notConfigured` | `Jishu.configure(...)` was not called before use |
+| `JishuError.httpError(400)` | Validation failed |
+| `JishuError.httpError(404)` | The configured `appId` does not exist or is inactive |
+| `JishuError.httpError(429)` | Rate limit — too many proposals or votes from the same IP/device window |
+| `JishuError.httpError(500)` | Server error after one retry |
 
 ## User identity and `displayUserID`
 

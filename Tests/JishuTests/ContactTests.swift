@@ -106,6 +106,64 @@ struct ContactTests {
         #expect(capturedRequest?.httpMethod == "POST")
     }
 
+    @Test("sendContactMessage sanitizes blank optional fields to nil")
+    func sanitizesBlankFields() async throws {
+        var capturedRequest: URLRequest?
+        MockURLProtocol.requestHandler = { request in
+            capturedRequest = request
+            return (makeHTTPResponse(status: 201), Data())
+        }
+        let client = makeClient()
+        try await client.sendContactMessage(
+            ContactMessage(
+                senderName: "   ",   // blank → should become nil
+                senderEmail: "  user@example.com  ",
+                subject: "",          // blank → should become nil
+                body: "  Hello  "
+            ),
+            appId: "app_test"
+        )
+        let bodyData = try #require(capturedRequest?.httpBody)
+        struct DecodedBody: Decodable {
+            let senderName: String?
+            let senderEmail: String
+            let subject: String?
+            let body: String
+        }
+        let decoded = try JSONDecoder().decode(DecodedBody.self, from: bodyData)
+        #expect(decoded.senderName == nil)
+        #expect(decoded.senderEmail == "user@example.com")
+        #expect(decoded.subject == nil)
+        #expect(decoded.body == "Hello")
+    }
+
+    @Test("sendContactMessage preserves non-blank optional fields after trimming")
+    func preservesTrimmedOptionalFields() async throws {
+        var capturedRequest: URLRequest?
+        MockURLProtocol.requestHandler = { request in
+            capturedRequest = request
+            return (makeHTTPResponse(status: 201), Data())
+        }
+        let client = makeClient()
+        try await client.sendContactMessage(
+            ContactMessage(
+                senderName: "  Alice  ",
+                senderEmail: "alice@example.com",
+                subject: "  Hello  ",
+                body: "World"
+            ),
+            appId: "app_test"
+        )
+        let bodyData = try #require(capturedRequest?.httpBody)
+        struct DecodedBody: Decodable {
+            let senderName: String?
+            let subject: String?
+        }
+        let decoded = try JSONDecoder().decode(DecodedBody.self, from: bodyData)
+        #expect(decoded.senderName == "Alice")
+        #expect(decoded.subject == "Hello")
+    }
+
     @Test("sendContactMessage encodes all fields in request body")
     func encodesAllFields() async throws {
         var capturedRequest: URLRequest?

@@ -28,4 +28,16 @@ public struct ContactMessage: Sendable {
         self.body = body
         self.userId = userId
     }
+
+    /// Returns a copy with all string fields trimmed and blank optional fields set to `nil`.
+    /// Called internally before encoding so app code does not need to sanitize inputs.
+    func sanitized(deviceUserID: String) -> ContactMessage {
+        ContactMessage(
+            senderName: senderName.jishuNilIfBlank,
+            senderEmail: senderEmail.trimmingCharacters(in: .whitespacesAndNewlines),
+            subject: subject.jishuNilIfBlank,
+            body: body.trimmingCharacters(in: .whitespacesAndNewlines),
+            userId: userId ?? deviceUserID
+        )
+    }
 }
