@@ -18,13 +18,13 @@ public enum Jishu {
     ///   - apiToken: Bearer token issued from Account → API access.
     ///   - appId: The app identifier registered in the Jishu dashboard.
     ///   - environment: Optional environment override (`"production"`, `"staging"`, `"testflight"`, `"internal"`).
-    ///   - enableDebugLogs: When `true`, emits debug output to stdout. Defaults to `false`.
+    ///   - debugLevel: Controls console output verbosity. `.default` prints errors only; `.verbose` prints all SDK activity. Defaults to `.default`.
     public static func configure(
         baseURL: URL,
         apiToken: String,
         appId: String,
         environment: String? = nil,
-        enableDebugLogs: Bool = false
+        debugLevel: JishuDebugLevel = .default
     ) {
         let pathComponents = baseURL.pathComponents.filter { $0 != "/" }
         precondition(
@@ -36,7 +36,7 @@ public enum Jishu {
             apiToken: apiToken,
             appId: appId,
             environment: environment,
-            enableDebugLogs: enableDebugLogs
+            debugLevel: debugLevel
         )
         _configuration = config
         _client = JishuClient(configuration: config)
