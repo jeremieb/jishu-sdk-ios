@@ -5,5 +5,5 @@ struct JishuConfiguration: Sendable {
     let apiToken: String
     let appId: String
     let environment: String?
-    let enableDebugLogs: Bool
+    let debugLevel: JishuDebugLevel
 }

@@ -14,7 +14,7 @@ struct JishuClient: Sendable {
             config.timeoutIntervalForRequest = 10
             self.session = URLSession(configuration: config)
         }
-        self.logger = JishuLogger(isEnabled: configuration.enableDebugLogs)
+        self.logger = JishuLogger(level: configuration.debugLevel)
     }
 
     func checkAccess(externalUserId: String?, deviceId: String) async throws -> AccessResult {
@@ -52,34 +52,39 @@ struct JishuClient: Sendable {
     // MARK: - Private
 
     private func perform(_ request: URLRequest, retriesLeft: Int) async throws -> AccessResult {
+        logger.verbose("Sending \(request.httpMethod ?? "GET") \(request.url?.absoluteString ?? "")")
         do {
             let (data, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse else {
                 throw JishuError.invalidBaseURL
             }
-            logger.debug("HTTP \(http.statusCode)")
+            logger.verbose("HTTP \(http.statusCode)")
 
             switch http.statusCode {
             case 200:
                 return try decode(data)
             case 400..<500:
+                logger.error("HTTP error \(http.statusCode) — \(request.url?.absoluteString ?? "")")
                 throw JishuError.httpError(http.statusCode)
             case 500...:
                 if retriesLeft > 0 {
-                    logger.debug("Retrying after \(http.statusCode)")
+                    logger.error("Server error \(http.statusCode), retrying...")
                     return try await perform(request, retriesLeft: retriesLeft - 1)
                 }
+                logger.error("Server error \(http.statusCode) — no retries left")
                 throw JishuError.httpError(http.statusCode)
             default:
+                logger.error("Unexpected HTTP status \(http.statusCode)")
                 throw JishuError.httpError(http.statusCode)
             }
         } catch let error as JishuError {
             throw error
         } catch {
             if retriesLeft > 0 {
-                logger.debug("Retrying after transport error: \(error.localizedDescription)")
+                logger.error("Transport error, retrying: \(error.localizedDescription)")
                 return try await perform(request, retriesLeft: retriesLeft - 1)
             }
+            logger.error("Transport error: \(error.localizedDescription)")
             throw error
         }
     }
@@ -117,33 +122,38 @@ struct JishuClient: Sendable {
     }
 
     private func performContact(_ request: URLRequest, retriesLeft: Int) async throws {
+        logger.verbose("Sending \(request.httpMethod ?? "GET") \(request.url?.absoluteString ?? "")")
         do {
             let (_, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse else {
                 throw JishuError.invalidBaseURL
             }
-            logger.debug("Contact HTTP \(http.statusCode)")
+            logger.verbose("Contact HTTP \(http.statusCode)")
             switch http.statusCode {
             case 200, 201:
                 return
             case 400..<500:
+                logger.error("Contact HTTP error \(http.statusCode) — \(request.url?.absoluteString ?? "")")
                 throw JishuError.httpError(http.statusCode)
             case 500...:
                 if retriesLeft > 0 {
-                    logger.debug("Retrying contact after \(http.statusCode)")
+                    logger.error("Contact server error \(http.statusCode), retrying...")
                     return try await performContact(request, retriesLeft: retriesLeft - 1)
                 }
+                logger.error("Contact server error \(http.statusCode) — no retries left")
                 throw JishuError.httpError(http.statusCode)
             default:
+                logger.error("Contact unexpected HTTP status \(http.statusCode)")
                 throw JishuError.httpError(http.statusCode)
             }
         } catch let error as JishuError {
             throw error
         } catch {
             if retriesLeft > 0 {
-                logger.debug("Retrying contact after transport error: \(error.localizedDescription)")
+                logger.error("Contact transport error, retrying: \(error.localizedDescription)")
                 return try await performContact(request, retriesLeft: retriesLeft - 1)
             }
+            logger.error("Contact transport error: \(error.localizedDescription)")
             throw error
         }
     }
@@ -174,33 +184,38 @@ struct JishuClient: Sendable {
         retriesLeft: Int,
         decode: (Data) throws -> T
     ) async throws -> T {
+        logger.verbose("Sending \(request.httpMethod ?? "GET") \(request.url?.absoluteString ?? "")")
         do {
             let (data, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse else {
                 throw JishuError.invalidBaseURL
             }
-            logger.debug("HTTP \(http.statusCode)")
+            logger.verbose("HTTP \(http.statusCode)")
             switch http.statusCode {
             case 200, 201:
                 do { return try decode(data) } catch { throw JishuError.decodingFailed(error) }
             case 400..<500:
+                logger.error("HTTP error \(http.statusCode) — \(request.url?.absoluteString ?? "")")
                 throw JishuError.httpError(http.statusCode)
             case 500...:
                 if retriesLeft > 0 {
-                    logger.debug("Retrying after \(http.statusCode)")
+                    logger.error("Server error \(http.statusCode), retrying...")
                     return try await performDecoding(request, retriesLeft: retriesLeft - 1, decode: decode)
                 }
+                logger.error("Server error \(http.statusCode) — no retries left")
                 throw JishuError.httpError(http.statusCode)
             default:
+                logger.error("Unexpected HTTP status \(http.statusCode)")
                 throw JishuError.httpError(http.statusCode)
             }
         } catch let error as JishuError {
             throw error
         } catch {
             if retriesLeft > 0 {
-                logger.debug("Retrying after transport error: \(error.localizedDescription)")
+                logger.error("Transport error, retrying: \(error.localizedDescription)")
                 return try await performDecoding(request, retriesLeft: retriesLeft - 1, decode: decode)
             }
+            logger.error("Transport error: \(error.localizedDescription)")
             throw error
         }
     }
