@@ -2,7 +2,7 @@
 
 ![github package](https://github.com/user-attachments/assets/161cb128-4312-4dd2-b69c-a47698ee8096)
 
-A lightweight Swift package that checks [Jishu](https://jishu.page) promo access from iOS apps, with an optional bridge for RevenueCat entitlements.
+A lightweight Swift package for [Jishu](https://jishu.page) — check promo access grants, send contact form messages, and collect feature proposals from iOS apps.
 
 - **Current version:** `1.0.0`
 - **Minimum platform:** iOS 15
@@ -15,13 +15,15 @@ A lightweight Swift package that checks [Jishu](https://jishu.page) promo access
 1. [What is Jishu promo access?](#what-is-jishu-promo-access)
 2. [Installation](#installation)
 3. [Quickstart](#quickstart)
-4. [User identity and `displayUserID`](#user-identity-and-displayuserid)
-5. [Staging smoke test](#staging-smoke-test)
-6. [RevenueCat integration](#revenuecat-integration)
-7. [Reinstall limitation](#reinstall-limitation)
-8. [Security notes](#security-notes)
-9. [Publishing a new version](#publishing-a-new-version)
-10. [Running the tests](#running-the-tests)
+4. [Contact form](#contact-form)
+5. [Feature feedback](#feature-feedback)
+6. [User identity and `displayUserID`](#user-identity-and-displayuserid)
+7. [Staging smoke test](#staging-smoke-test)
+8. [RevenueCat integration](#revenuecat-integration)
+9. [Reinstall limitation](#reinstall-limitation)
+10. [Security notes](#security-notes)
+11. [Publishing a new version](#publishing-a-new-version)
+12. [Running the tests](#running-the-tests)
 
 ---
 
@@ -112,7 +114,239 @@ Pass your own user ID when the customer is signed in — this is the preferred m
 let result = try await Jishu.checkAccess(externalUserId: currentUser.id)
 ```
 
+### 3. Add feedback in your app
+
+Once the SDK is configured, you can call the public feedback endpoints from any `ObservableObject`, `ViewModel`, or other async context. The SDK automatically uses the configured `appId` and a stable device-scoped voter token.
+
+If you want to expose feature requests in your UI, see the [Feature feedback](#feature-feedback) section below for a complete example.
+
 ---
+
+## Contact form
+
+`Jishu.sendContactMessage(_:)` lets your users send a message directly to you from within your app. Messages land in the **User Messages** inbox in your Jishu dashboard, where you can read and reply via email.
+
+### Basic usage
+
+```swift
+do {
+    try await Jishu.sendContactMessage(ContactMessage(
+        senderEmail: "jane@example.com",
+        body: "Hi, I have a question about my account."
+    ))
+    // Show a "Message sent!" confirmation
+} catch JishuError.httpError(429) {
+    // Rate limit hit — ask the user to wait before trying again
+} catch {
+    // Network error or validation failure
+}
+```
+
+### `ContactMessage` fields
+
+| Field | Type | Required | Notes |
+|-------|------|----------|-------|
+| `senderEmail` | `String` | Yes | Must be a valid email address |
+| `body` | `String` | Yes | Max 5 000 characters |
+| `senderName` | `String?` | No | Displayed in the dashboard message list |
+| `subject` | `String?` | No | Shown as the message subject line |
+| `userId` | `String?` | No | Automatically filled with `Jishu.displayUserID` when `nil`. Lets the app owner add this sender to a promo grant directly from the dashboard. |
+
+```swift
+// All fields
+let message = ContactMessage(
+    senderName: "Jane Smith",
+    senderEmail: "jane@example.com",
+    subject: "Question about my portfolio",
+    body: "I noticed that my site is not loading correctly on Safari..."
+    // userId is automatically filled with Jishu.displayUserID
+)
+try await Jishu.sendContactMessage(message)
+```
+
+### Rate limiting
+
+The endpoint is public (no API token required) and rate-limited to **10 messages per hour per IP address** per app. On limit hit, `JishuError.httpError(429)` is thrown. Show a user-friendly message and do not retry automatically.
+
+### Errors
+
+| Error | Meaning |
+|-------|---------|
+| `JishuError.notConfigured` | `Jishu.configure(...)` was not called before sending |
+| `JishuError.httpError(400)` | Validation failed (missing email or body, value too long) |
+| `JishuError.httpError(404)` | The `appId` supplied to `configure` does not exist or is inactive |
+| `JishuError.httpError(429)` | Rate limit — more than 10 messages/hour from this IP |
+| `JishuError.httpError(500)` | Server error — the SDK retries once automatically |
+
+### SwiftUI example
+
+```swift
+struct ContactFormView: View {
+    @State private var email = ""
+    @State private var body  = ""
+    @State private var state: FormState = .idle
+
+    enum FormState { case idle, sending, success, error(String) }
+
+    var body: some View {
+        Form {
+            TextField("Your email", text: $email)
+                .keyboardType(.emailAddress)
+            TextEditor(text: $body)
+                .frame(minHeight: 120)
+        }
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Send") { send() }
+                    .disabled(email.isEmpty || body.isEmpty || state == .sending)
+            }
+        }
+        .overlay {
+            if case .success = state {
+                Text("Message sent!").foregroundStyle(.green)
+            }
+        }
+    }
+
+    private func send() {
+        state = .sending
+        Task {
+            do {
+                try await Jishu.sendContactMessage(
+                    ContactMessage(senderEmail: email, body: body)
+                )
+                state = .success
+            } catch JishuError.httpError(429) {
+                state = .error("Too many messages — please wait an hour and try again.")
+            } catch {
+                state = .error("Could not send message. Please try again.")
+            }
+        }
+    }
+}
+```
+
+---
+
+## Feature feedback
+
+`Jishu.fetchProposals()`, `Jishu.submitProposal(...)`, and `Jishu.vote(on:)` wrap the public feedback endpoints for the configured app. No auth header is sent on these requests.
+
+### What you need before using it
+
+1. Call `Jishu.configure(...)` once at app startup.
+2. Use the same `appId` that is registered in your Jishu dashboard.
+3. Make sure the backend feedback routes are live for that app:
+   `GET /api/apps/:appId/proposals`
+   `POST /api/apps/:appId/proposals`
+   `POST /api/apps/:appId/proposals/:id/vote`
+
+### Basic usage
+
+```swift
+let proposals = try await Jishu.fetchProposals()
+
+let created = try await Jishu.submitProposal(
+    title: "Offline mode",
+    description: "Let me keep reading when I lose connection."
+)
+
+let updatedVoteCount = try await Jishu.vote(on: created)
+```
+
+### Typical app integration
+
+The simplest integration is:
+
+1. Load proposals when the screen opens with `Jishu.fetchProposals()`.
+2. Submit a new idea with `Jishu.submitProposal(title:description:)`.
+3. Update the vote count for an item with `Jishu.vote(on:)`.
+4. Store the result in your own screen state; the SDK does not manage UI state for you.
+
+### SwiftUI example
+
+```swift
+import Jishu
+import SwiftUI
+
+@MainActor
+final class FeedbackViewModel: ObservableObject {
+    @Published var proposals: [JishuProposal] = []
+    @Published var isLoading = false
+    @Published var errorMessage: String?
+
+    func load() async {
+        isLoading = true
+        defer { isLoading = false }
+
+        do {
+            proposals = try await Jishu.fetchProposals()
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func submit(title: String, description: String?) async {
+        do {
+            let proposal = try await Jishu.submitProposal(title: title, description: description)
+            proposals.insert(proposal, at: 0)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func vote(on proposal: JishuProposal) async {
+        do {
+            let updatedCount = try await Jishu.vote(on: proposal)
+            if let index = proposals.firstIndex(where: { $0.id == proposal.id }) {
+                proposals[index] = JishuProposal(
+                    id: proposal.id,
+                    title: proposal.title,
+                    description: proposal.description,
+                    status: proposal.status,
+                    voteCount: updatedCount,
+                    createdAt: proposal.createdAt
+                )
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+```
+
+### Public API
+
+```swift
+public static func fetchProposals() async throws -> [JishuProposal]
+public static func submitProposal(title: String, description: String?) async throws -> JishuProposal
+public static func vote(on proposal: JishuProposal) async throws -> Int
+```
+
+### Models
+
+| Type | Notes |
+|------|-------|
+| `JishuProposal` | `id`, `title`, `description`, `status`, `voteCount`, `createdAt` |
+| `JishuProposalStatus` | `open`, `planned`, `inProgress`, `shipped`, `rejected` |
+
+### Behavior notes
+
+- `submitProposal` and `vote(on:)` use a stable device-scoped voter token managed by the SDK.
+- The feedback endpoints are public and rate-limited by the backend.
+- Duplicate votes from the same device are ignored by the server.
+- The SDK retries once on transport failures or 5xx responses, matching the contact form behavior.
+
+### Common errors
+
+| Error | Meaning |
+|-------|---------|
+| `JishuError.notConfigured` | `Jishu.configure(...)` was not called before use |
+| `JishuError.httpError(400)` | Validation failed |
+| `JishuError.httpError(404)` | The configured `appId` does not exist or is inactive |
+| `JishuError.httpError(429)` | Rate limit — too many proposals or votes from the same IP/device window |
+| `JishuError.httpError(500)` | Server error after one retry |
 
 ## User identity and `displayUserID`
 
@@ -130,6 +364,18 @@ print(Jishu.displayUserID) // e.g. "550E8400-E29B-41D4-A716-446655440000"
 | Unauthenticated app or guest mode | Omit `externalUserId`; the SDK sends `displayUserID` automatically |
 
 Grants are matched on the server side against whichever identity you send. Mixing both identities in different calls for the same user can produce inconsistent results.
+
+**`displayUserID` and contact messages:**
+
+When a user submits a contact form, the SDK automatically includes their `displayUserID` as the `userId` field of the message. This lets you see the sender's Jishu identity directly in the **User Messages** dashboard and add them to a promo grant with one click — no copy-pasting required. If your app has its own auth system, pass an explicit `userId` to `ContactMessage` to use your stable user ID instead:
+
+```swift
+try await Jishu.sendContactMessage(ContactMessage(
+    senderEmail: "jane@example.com",
+    body: "Hi, I have a question.",
+    userId: currentUser.id   // override with your own stable ID
+))
+```
 
 ---
 
@@ -266,7 +512,7 @@ cd Jishu
 swift test
 ```
 
-All 15 tests should pass. The test suite covers:
+All tests should pass. The test suite covers:
 
 | Suite | What it tests |
 |---|---|
@@ -274,6 +520,7 @@ All 15 tests should pass. The test suite covers:
 | `AccessResult decoding` | Full response, `matchType: none`, null fields, ISO 8601 dates |
 | `AccessCache` | Cache hit/miss, negative result exclusion, expiry, 5-minute cap |
 | `JishuClient` | 200 success, 401 no-retry, 500 retry, retry-then-succeed, auth header |
+| `Contact` | 201/200 success, 429 error, 500 retry, correct URL and no auth header, body encoding |
 
 ### Testing in your Xcode project (local package)
 

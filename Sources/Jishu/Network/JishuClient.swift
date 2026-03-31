@@ -22,6 +22,33 @@ struct JishuClient: Sendable {
         return try await perform(request, retriesLeft: 1)
     }
 
+    func sendContactMessage(_ message: ContactMessage, appId: String) async throws {
+        let sanitized = message.sanitized(deviceUserID: DeviceIDStore.deviceID())
+        let request = try buildContactRequest(message: sanitized, appId: appId)
+        try await performContact(request, retriesLeft: 1)
+    }
+
+    func fetchProposals(appId: String) async throws -> [JishuProposal] {
+        let request = try buildProposalsRequest(appId: appId)
+        return try await performDecoding(request, retriesLeft: 1) { data in
+            try Self.plainDecoder.decode(ProposalListResponse.self, from: data).proposals
+        }
+    }
+
+    func submitProposal(appId: String, title: String, description: String?, voterToken: String) async throws -> JishuProposal {
+        let request = try buildSubmitProposalRequest(appId: appId, title: title, description: description, voterToken: voterToken)
+        return try await performDecoding(request, retriesLeft: 0) { data in
+            try Self.plainDecoder.decode(SingleProposalResponse.self, from: data).proposal
+        }
+    }
+
+    func voteOnProposal(appId: String, proposalId: String, voterToken: String) async throws -> Int {
+        let request = try buildVoteRequest(appId: appId, proposalId: proposalId, voterToken: voterToken)
+        return try await performDecoding(request, retriesLeft: 0) { data in
+            try Self.plainDecoder.decode(VoteCountResponse.self, from: data).voteCount
+        }
+    }
+
     // MARK: - Private
 
     private func perform(_ request: URLRequest, retriesLeft: Int) async throws -> AccessResult {
@@ -89,6 +116,135 @@ struct JishuClient: Sendable {
         }
     }
 
+    private func performContact(_ request: URLRequest, retriesLeft: Int) async throws {
+        do {
+            let (_, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                throw JishuError.invalidBaseURL
+            }
+            logger.debug("Contact HTTP \(http.statusCode)")
+            switch http.statusCode {
+            case 200, 201:
+                return
+            case 400..<500:
+                throw JishuError.httpError(http.statusCode)
+            case 500...:
+                if retriesLeft > 0 {
+                    logger.debug("Retrying contact after \(http.statusCode)")
+                    return try await performContact(request, retriesLeft: retriesLeft - 1)
+                }
+                throw JishuError.httpError(http.statusCode)
+            default:
+                throw JishuError.httpError(http.statusCode)
+            }
+        } catch let error as JishuError {
+            throw error
+        } catch {
+            if retriesLeft > 0 {
+                logger.debug("Retrying contact after transport error: \(error.localizedDescription)")
+                return try await performContact(request, retriesLeft: retriesLeft - 1)
+            }
+            throw error
+        }
+    }
+
+    private func buildContactRequest(message: ContactMessage, appId: String) throws -> URLRequest {
+        let base = configuration.baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let encodedAppId = appId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? appId
+        guard let url = URL(string: "\(base)/api/apps/\(encodedAppId)/contact") else {
+            throw JishuError.invalidBaseURL
+        }
+        var request = URLRequest(url: url, timeoutInterval: 10)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body = ContactMessageBody(
+            senderName: message.senderName,
+            senderEmail: message.senderEmail,
+            subject: message.subject,
+            body: message.body,
+            userId: message.userId  // filled by sanitized(deviceUserID:)
+        )
+        request.httpBody = try JSONEncoder().encode(body)
+        return request
+    }
+
+    // Generic perform+decode helper for feedback endpoints (public, no auth).
+    private func performDecoding<T: Sendable>(
+        _ request: URLRequest,
+        retriesLeft: Int,
+        decode: (Data) throws -> T
+    ) async throws -> T {
+        do {
+            let (data, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                throw JishuError.invalidBaseURL
+            }
+            logger.debug("HTTP \(http.statusCode)")
+            switch http.statusCode {
+            case 200, 201:
+                do { return try decode(data) } catch { throw JishuError.decodingFailed(error) }
+            case 400..<500:
+                throw JishuError.httpError(http.statusCode)
+            case 500...:
+                if retriesLeft > 0 {
+                    logger.debug("Retrying after \(http.statusCode)")
+                    return try await performDecoding(request, retriesLeft: retriesLeft - 1, decode: decode)
+                }
+                throw JishuError.httpError(http.statusCode)
+            default:
+                throw JishuError.httpError(http.statusCode)
+            }
+        } catch let error as JishuError {
+            throw error
+        } catch {
+            if retriesLeft > 0 {
+                logger.debug("Retrying after transport error: \(error.localizedDescription)")
+                return try await performDecoding(request, retriesLeft: retriesLeft - 1, decode: decode)
+            }
+            throw error
+        }
+    }
+
+    private func buildProposalsRequest(appId: String) throws -> URLRequest {
+        let base = configuration.baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let encodedAppId = appId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? appId
+        guard let url = URL(string: "\(base)/api/apps/\(encodedAppId)/proposals?sort=votes&status=open") else {
+            throw JishuError.invalidBaseURL
+        }
+        var request = URLRequest(url: url, timeoutInterval: 10)
+        request.httpMethod = "GET"
+        return request
+    }
+
+    private func buildSubmitProposalRequest(appId: String, title: String, description: String?, voterToken: String) throws -> URLRequest {
+        let base = configuration.baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let encodedAppId = appId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? appId
+        guard let url = URL(string: "\(base)/api/apps/\(encodedAppId)/proposals") else {
+            throw JishuError.invalidBaseURL
+        }
+        var request = URLRequest(url: url, timeoutInterval: 10)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(SubmitProposalBody(title: title, description: description, voterToken: voterToken))
+        return request
+    }
+
+    private func buildVoteRequest(appId: String, proposalId: String, voterToken: String) throws -> URLRequest {
+        let base = configuration.baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let encodedAppId      = appId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? appId
+        let encodedProposalId = proposalId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? proposalId
+        guard let url = URL(string: "\(base)/api/apps/\(encodedAppId)/proposals/\(encodedProposalId)/vote") else {
+            throw JishuError.invalidBaseURL
+        }
+        var request = URLRequest(url: url, timeoutInterval: 10)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(VoteBody(voterToken: voterToken))
+        return request
+    }
+
+    private static let plainDecoder = JSONDecoder()
+
     private static let decoder: JSONDecoder = {
         let d = JSONDecoder()
         nonisolated(unsafe) let formatter = ISO8601DateFormatter()
@@ -106,7 +262,7 @@ struct JishuClient: Sendable {
     }()
 }
 
-// MARK: - Request body
+// MARK: - Request bodies
 
 private struct EntitlementCheckRequest: Encodable {
     let appId: String
@@ -127,4 +283,27 @@ private struct EntitlementCheckRequest: Encodable {
         try c.encodeIfPresent(externalUserId, forKey: .externalUserId)
         try c.encodeIfPresent(environment, forKey: .environment)
     }
+}
+
+private struct SubmitProposalBody: Encodable {
+    let title: String
+    let description: String?
+    let voterToken: String
+    enum CodingKeys: String, CodingKey {
+        case title, description
+        case voterToken = "voter_token"
+    }
+}
+
+private struct VoteBody: Encodable {
+    let voterToken: String
+    enum CodingKeys: String, CodingKey { case voterToken = "voter_token" }
+}
+
+private struct ContactMessageBody: Encodable {
+    let senderName: String?
+    let senderEmail: String
+    let subject: String?
+    let body: String
+    let userId: String?
 }

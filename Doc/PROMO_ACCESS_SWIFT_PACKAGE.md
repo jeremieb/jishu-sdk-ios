@@ -1,8 +1,10 @@
-# Promo Access Swift Package Start Doc
+# Jishu Swift SDK Messaging Doc
 
-This file is the implementation handoff for the separate public Swift SDK repository.
+This file is the implementation handoff for the separate public Swift SDK repository at:
 
-Package name:
+- `/Users/jeremieberduck/Developer/jishu-sdk-ios`
+
+Repository package name:
 
 - `Jishu`
 
@@ -12,245 +14,255 @@ Import shape:
 
 Primary goal:
 
-- provide a small Swift package that can check Jishu promo access from iOS apps and optionally merge that result with RevenueCat entitlement state
+- make contact messaging a first-class SDK capability for native iOS apps
+- let app developers wire a simple SwiftUI or UIKit form to a `ContactMessage` value and send it to Jishu with minimal setup
+- ship an example iOS app that demonstrates the full integration flow
+
+This document is about messaging support. Existing promo-access functionality may remain in the package, but messaging is the new priority capability.
+
+## Product Behavior
+
+The host app is configured with a Jishu `appId`.
+
+The SDK should let the app developer:
+
+1. create a simple contact form view
+2. map the entered values into a `ContactMessage`
+3. call a single SDK method
+4. let the SDK send `POST /api/apps/:appId/contact`
+
+On success:
+
+- the message is stored by Jishu
+- the app owner sees it in Dashboard → User Messages
+- the app owner may receive a push notification in Jishu client apps
 
 ## Locked API Contract
 
-The current server contract is live on staging and should now be treated as the SDK v1 contract.
-
 Endpoint:
 
-- `POST /api/v1/mobile/entitlements/check`
+- `POST /api/apps/:appId/contact`
 
 Base URL rule:
 
 - callers pass the root origin only, for example `https://jishu.page` or `https://staging.jishu.page`
-- the SDK appends `/api/v1/mobile/entitlements/check`
+- the SDK appends `/api/apps/:appId/contact`
 - reject base URLs that already contain a path component other than `/`
 
 Headers:
 
-- `Authorization: Bearer <apiToken>`
 - `Content-Type: application/json`
+- no auth header for this endpoint
 
 Request body:
 
 ```json
 {
-  "appId": "app_id",
-  "platform": "ios",
-  "externalUserId": "customer_123",
-  "deviceId": "550e8400-e29b-41d4-a716-446655440000",
-  "environment": "staging"
+  "senderEmail": "visitor@example.com",
+  "senderName": "Jane Visitor",
+  "subject": "Quick question",
+  "body": "Hi, I wanted to ask about..."
 }
 ```
 
-Response body:
+Success response:
 
 ```json
-{
-  "granted": true,
-  "grantId": "grant_id_or_null",
-  "matchType": "user",
-  "expiresAt": "2026-04-24T12:00:00.000Z",
-  "serverTime": "2026-03-24T12:00:00.000Z"
-}
+{ "ok": true }
 ```
 
-Notes:
+Error shape:
 
-- `platform` is always hardcoded to `"ios"` inside the SDK
-- at least one of `externalUserId` or `deviceId` must be sent
-- `environment` is optional and may be `production`, `staging`, `testflight`, `internal`, or omitted
-- the server may return `matchType = "none"` with `granted = false`
+```json
+{ "error": "Human-readable message" }
+```
+
+Validation rules:
+
+- `senderEmail` is required, valid email, max 255 chars
+- `body` is required, max 5000 chars
+- `senderName` is optional, max 255 chars
+- `subject` is optional, max 255 chars
+- endpoint is public, but `appId` must exist server-side
+- rate limited per IP hash + app
 
 ## Public API
 
-Keep the initial public surface small:
+The messaging surface should be extremely small.
+
+Recommended public API:
 
 ```swift
 public enum Jishu {
-    public static func configure(baseURL: URL, apiToken: String, appId: String, environment: String? = nil, enableDebugLogs: Bool = false)
-    public static var displayUserID: String { get }
-    public static func checkAccess(externalUserId: String? = nil) async throws -> AccessResult
+    public static func configure(
+        baseURL: URL,
+        appId: String,
+        apiToken: String? = nil,
+        environment: String? = nil,
+        enableDebugLogs: Bool = false
+    )
+
+    public static func sendContactMessage(_ message: ContactMessage) async throws
 }
 ```
 
-Phase 2 optional helper:
+Required request model:
 
 ```swift
-public static func hasAccessWithRevenueCat(entitlementID: String, externalUserId: String? = nil) async throws -> RevenueCatAccessResult
+public struct ContactMessage: Sendable {
+    public let senderEmail: String
+    public let senderName: String?
+    public let subject: String?
+    public let body: String
+
+    public init(
+        senderEmail: String,
+        senderName: String? = nil,
+        subject: String? = nil,
+        body: String
+    )
+}
 ```
 
-Required response model:
+Recommended error model:
+
+- reuse `JishuError` where reasonable
+- add a transport / API error case that can expose the server `{ error }` message safely
+- keep configuration errors separate from request errors
+
+Important compatibility note:
+
+- if promo-access APIs remain in the SDK, `apiToken` may still be used by those calls
+- messaging itself must not require an API token
+
+## Expected Swift Integration
+
+The intended developer experience should look roughly like this:
 
 ```swift
-public struct AccessResult: Sendable {
-    public let granted: Bool
-    public let grantId: String?
-    public let matchType: MatchType
-    public let expiresAt: Date?
-    public let serverTime: Date
-}
+import Jishu
+import SwiftUI
 
-public enum MatchType: String, Sendable {
-    case user
-    case device
-    case none
+struct ContactView: View {
+    @State private var email = ""
+    @State private var name = ""
+    @State private var subject = ""
+    @State private var body = ""
+
+    var body: some View {
+        Button("Send") {
+            Task {
+                try await Jishu.sendContactMessage(
+                    ContactMessage(
+                        senderEmail: email,
+                        senderName: name.isEmpty ? nil : name,
+                        subject: subject.isEmpty ? nil : subject,
+                        body: body
+                    )
+                )
+            }
+        }
+    }
 }
 ```
 
-## Identity Rules
+That is the bar: the host app should be able to connect a basic view to a message object and send it with one SDK call.
 
-Use `deviceId` internally, but expose it to app developers as:
+## Implementation Requirements
 
-- `Jishu.displayUserID`
-
-Implementation requirements:
-
-- generate a UUID once
-- store it in `UserDefaults`
-- reuse it on every launch
-- never rotate it automatically
-
-Important warning for package docs:
-
-- reinstalling the app creates a new ID
-- any active promo grant attached to the old ID stops matching
-- `externalUserId` is the preferred mode whenever the customer already has authentication
-
-## Network Behavior
-
-Implementation requirements:
-
-- use `URLSession`
-- 10 second request timeout
-- no retries for 4xx responses
-- at most 1 retry for transient transport failures or 5xx responses
-- do not log the raw API token
-- debug logging must be opt-in
-
-Caching rule for v1:
-
-- cache only positive responses
-- cache until the earlier of:
-  - `expiresAt`
-  - 5 minutes from fetch time
-- do not cache negative responses beyond the current call
-
-## Suggested Package Layout
+Suggested additions in the Swift repo:
 
 ```text
 Sources/Jishu/
-  Jishu.swift
-  Config/JishuConfiguration.swift
-  Identity/DeviceIDStore.swift
-  Network/JishuClient.swift
-  Models/AccessResult.swift
-  Cache/AccessCache.swift
-  Support/Logger.swift
+  Contact/ContactMessage.swift
+  Network/ContactRequest.swift
 ```
 
-Tests:
+Expected updates:
 
-```text
-Tests/JishuTests/
-  DeviceIDStoreTests.swift
-  JishuClientTests.swift
-  AccessCacheTests.swift
-  AccessResultDecodingTests.swift
-```
+- `Sources/Jishu/Jishu.swift`
+- `Sources/Jishu/Config/JishuConfiguration.swift`
+- `Sources/Jishu/Network/JishuClient.swift`
+- `Sources/Jishu/Models/JishuError.swift` if needed
 
-## RevenueCat Scope
+Behavior requirements:
 
-Do not make RevenueCat a hard dependency for the first package cut.
+- use `URLSession`
+- 10 second timeout
+- no automatic retry for 4xx responses
+- at most 1 retry for transient transport failures or 5xx responses
+- never log message body or raw API token in debug output
+- validate required fields before sending when it improves developer feedback
 
-Recommended approach:
+## Example App Requirement
 
-- ship the core package first without RevenueCat linkage
-- add RevenueCat bridge helpers in a second pass
-- if RevenueCat support is added, keep it behind a separate source file or target so the core package remains usable without that dependency
+The Swift repo already contains an example app. Update it to demonstrate messaging.
 
-Minimum docs requirement when RevenueCat support is added:
+Target:
 
-- authenticated apps should use their real stable user ID for both RevenueCat `appUserID` and Jishu `externalUserId`
-- unauthenticated apps may use `Jishu.displayUserID`, but docs must warn about reinstall identity loss
+- `/Users/jeremieberduck/Developer/jishu-sdk-ios/App Example`
 
-## Repo Bootstrap
+The example app should include:
 
-Suggested repo contents:
+- SDK configuration
+- a simple contact form screen
+- local loading state
+- success message
+- failure message from thrown SDK error
+
+The example should be minimal and real, not pseudocode hidden in README only.
+
+## Suggested Repo Layout
 
 ```text
 Package.swift
 README.md
-Sources/
-Tests/
+Sources/Jishu/
+Tests/JishuTests/
+App Example/
 LICENSE
-.gitignore
 ```
 
-Suggested minimum platforms:
+Suggested minimum platform:
 
 - iOS 15+
 
-Reason:
+## Tests
 
-- async/await support keeps the initial API much cleaner
+Add tests covering:
 
-## README First Draft Sections
+- contact request encoding
+- success response handling
+- API error decoding from `{ error: "..." }`
+- missing configuration behavior
+- base URL validation
 
-The separate public repo should start with these sections:
+Suggested test files:
 
-1. What Jishu promo access is
+```text
+Tests/JishuTests/
+  ContactMessageEncodingTests.swift
+  ContactRequestTests.swift
+```
+
+## README Sections
+
+The Swift repo README should include:
+
+1. What Jishu messaging is
 2. Installation via Swift Package Manager
-3. Quickstart
-4. `displayUserID` and identity guidance
-5. Staging test example
-6. RevenueCat integration notes
-7. Reinstall limitation warning
-8. Security notes for API tokens
+3. Configure the SDK
+4. Send a contact message from a SwiftUI view
+5. Error handling
+6. Example app
+7. Optional note about promo access if it remains in the package
 
 ## First Milestone Checklist
 
-1. Create package repo and basic `Package.swift`
-2. Implement `configure`
-3. Implement persistent `displayUserID`
-4. Implement `checkAccess(externalUserId:)`
-5. Decode live staging response
-6. Add unit tests for config validation and decoding
-7. Add a tiny sample app or README example
-
-## Staging Smoke Test Target
-
-Use the currently live staging environment:
-
-- base URL: `https://staging.jishu.page`
-
-Manual test flow:
-
-1. create an app in Jishu staging Promo access
-2. create a grant for either a `User ID` or `Phone ID`
-3. create an API token in Account → API access
-4. configure the SDK with staging base URL, token, and app ID
-5. call `checkAccess`
-
-Expected success shape:
-
-- `granted == true`
-- `matchType == .user` or `.device`
-- `expiresAt != nil`
-
-## Non-Goals For First Cut
-
-- StoreKit integration
-- DeviceCheck or App Attest
-- background refresh
-- analytics
-- webhooks
-- multiple environments per singleton beyond the configured value
-
-## Open Decisions To Keep In Repo README
-
-- whether `Jishu` stays as a static singleton only, or also exposes an instance-based client later
-- whether RevenueCat helpers live in the main target or a secondary target
-- whether to add a Combine wrapper in addition to async/await
+1. Update configuration model so messaging can work without an API token
+2. Add `ContactMessage`
+3. Add network request for `POST /api/apps/:appId/contact`
+4. Add `Jishu.sendContactMessage(_:)`
+5. Update the example iOS app with a working contact form
+6. Add unit tests for encoding and error handling
+7. Update README quickstart for messaging
