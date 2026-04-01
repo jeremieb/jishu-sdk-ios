@@ -153,6 +153,8 @@ do {
 | `subject` | `String?` | No | Shown as the message subject line |
 | `userId` | `String?` | No | Automatically filled with `Jishu.displayUserID` when `nil`. Lets the app owner add this sender to a promo grant directly from the dashboard. |
 
+The SDK automatically includes `platform: "ios"` in every request. The Jishu dashboard displays an **iOS** badge on each message so you can tell at a glance which platform the sender is on — no action required on your side.
+
 ```swift
 // All fields
 let message = ContactMessage(
