@@ -172,7 +172,8 @@ struct JishuClient: Sendable {
             senderEmail: message.senderEmail,
             subject: message.subject,
             body: message.body,
-            userId: message.userId  // filled by sanitized(deviceUserID:)
+            userId: message.userId,  // filled by sanitized(deviceUserID:)
+            platform: "ios"
         )
         request.httpBody = try JSONEncoder().encode(body)
         return request
@@ -321,4 +322,5 @@ private struct ContactMessageBody: Encodable {
     let subject: String?
     let body: String
     let userId: String?
+    let platform: String
 }

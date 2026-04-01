@@ -18,12 +18,13 @@ A lightweight Swift package for [Jishu](https://jishu.page) — check promo acce
 4. [Contact form](#contact-form)
 5. [Feature feedback](#feature-feedback)
 6. [User identity and `displayUserID`](#user-identity-and-displayuserid)
-7. [Staging smoke test](#staging-smoke-test)
-8. [RevenueCat integration](#revenuecat-integration)
-9. [Reinstall limitation](#reinstall-limitation)
-10. [Security notes](#security-notes)
-11. [Publishing a new version](#publishing-a-new-version)
-12. [Running the tests](#running-the-tests)
+7. [Debug logging](#debug-logging)
+8. [Staging smoke test](#staging-smoke-test)
+9. [RevenueCat integration](#revenuecat-integration)
+10. [Reinstall limitation](#reinstall-limitation)
+11. [Security notes](#security-notes)
+12. [Publishing a new version](#publishing-a-new-version)
+13. [Running the tests](#running-the-tests)
 
 ---
 
@@ -379,6 +380,51 @@ try await Jishu.sendContactMessage(ContactMessage(
 
 ---
 
+## Debug logging
+
+Pass `debugLevel` to `configure()` to control what the SDK prints to the console. When omitted, the default level is used.
+
+| Level | Behavior |
+|-------|----------|
+| `.default` | Prints errors only (HTTP failures, transport errors, failed retries). Each line is prefixed with `‼️ Jishu -`. |
+| `.verbose` | Prints all SDK activity — outgoing requests, HTTP status codes, retries, and errors. Each line is prefixed with `📱 Jishu -`. |
+
+```swift
+// Errors only (default — same as omitting the parameter)
+Jishu.configure(
+    baseURL: URL(string: "https://jishu.page")!,
+    apiToken: "YOUR_API_TOKEN",
+    appId: "YOUR_APP_ID",
+    debugLevel: .default
+)
+
+// Full request/response trace
+Jishu.configure(
+    baseURL: URL(string: "https://jishu.page")!,
+    apiToken: "YOUR_API_TOKEN",
+    appId: "YOUR_APP_ID",
+    debugLevel: .verbose
+)
+```
+
+Example `.verbose` output:
+
+```
+📱 Jishu - Sending POST https://jishu.page/api/v1/mobile/entitlements/check
+📱 Jishu - HTTP 200
+```
+
+Example `.default` output (error scenario):
+
+```
+‼️ Jishu - Server error 503, retrying...
+‼️ Jishu - Server error 503 — no retries left
+```
+
+> **Tip:** Use `.verbose` during development and staging smoke tests. Switch to `.default` (or omit the parameter) in production to keep your logs quiet unless something goes wrong.
+
+---
+
 ## Staging smoke test
 
 Use this flow to verify the SDK works end-to-end against the live staging environment before shipping to production.
@@ -397,7 +443,7 @@ Jishu.configure(
     apiToken: "YOUR_STAGING_API_TOKEN",
     appId: "YOUR_STAGING_APP_ID",
     environment: "staging",
-    enableDebugLogs: true         // prints request/response info to console
+    debugLevel: .verbose          // prints request/response info to console
 )
 ```
 
@@ -534,4 +580,4 @@ To switch back to the published version later, remove the local package and re-a
 
 ### Integration test against staging
 
-Follow the [Staging smoke test](#staging-smoke-test) section above. Configure the SDK with `enableDebugLogs: true` to see the raw request/response cycle in the Xcode console.
+Follow the [Staging smoke test](#staging-smoke-test) section above. Configure the SDK with `debugLevel: .verbose` to see the full request/response cycle in the Xcode console.
