@@ -96,6 +96,28 @@ struct ProposalDecodingTests {
         #expect(!proposal.formattedCreatedAt.isEmpty)
     }
 
+    @Test("Round-trips through JSONEncoder and JSONDecoder")
+    func roundTripsThroughCodable() throws {
+        let proposal = JishuProposal(
+            id: "prop_roundtrip",
+            title: "Round trip",
+            description: "Verify custom encode matches decode",
+            status: .inProgress,
+            voteCount: 3,
+            createdAt: Date(timeIntervalSince1970: 1_743_194_111.844)
+        )
+
+        let data = try JSONEncoder().encode(proposal)
+        let decoded = try JSONDecoder().decode(JishuProposal.self, from: data)
+
+        #expect(decoded.id == proposal.id)
+        #expect(decoded.title == proposal.title)
+        #expect(decoded.description == proposal.description)
+        #expect(decoded.status == proposal.status)
+        #expect(decoded.voteCount == proposal.voteCount)
+        #expect(decoded.createdAt == proposal.createdAt)
+    }
+
     private func makeJSON(date: String) -> String {
         """
         {"id":"p","title":"T","description":null,"status":"open","voteCount":0,"createdAt":"\(date)"}

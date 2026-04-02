@@ -59,6 +59,16 @@ public struct JishuProposal: Codable, Identifiable, Sendable {
         createdAt = date
     }
 
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(title, forKey: .title)
+        try container.encode(description, forKey: .description)
+        try container.encode(status, forKey: .status)
+        try container.encode(voteCount, forKey: .voteCount)
+        try container.encode(Self.formatISO8601(createdAt), forKey: .createdAt)
+    }
+
     // Handles both "2026-03-28T20:35:11.844Z" (with fractional seconds)
     // and "2026-03-28T20:35:11Z" (without).
     private static func parseISO8601(_ string: String) -> Date? {
@@ -69,6 +79,12 @@ public struct JishuProposal: Codable, Identifiable, Sendable {
         let withoutFractional = ISO8601DateFormatter()
         withoutFractional.formatOptions = [.withInternetDateTime]
         return withoutFractional.date(from: string)
+    }
+
+    private static func formatISO8601(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
     }
 }
 

@@ -42,7 +42,7 @@ private func makeClient(enableDebugLogs: Bool = false) -> JishuClient {
         apiToken: "test_token",
         appId: "app_test",
         environment: "staging",
-        enableDebugLogs: enableDebugLogs
+        debugLevel: enableDebugLogs ? .verbose : .default
     )
     return JishuClient(configuration: config, session: makeSession())
 }

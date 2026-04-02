@@ -2,12 +2,36 @@ import Testing
 import Foundation
 @testable import Jishu
 
+final class ContactMockURLProtocol: URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        guard let handler = ContactMockURLProtocol.requestHandler else {
+            client?.urlProtocol(self, didFailWithError: URLError(.unknown))
+            return
+        }
+        do {
+            let (response, data) = try handler(request)
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
+}
+
 @Suite("Contact", .serialized)
 struct ContactTests {
 
     private func makeSession() -> URLSession {
         let config = URLSessionConfiguration.ephemeral
-        config.protocolClasses = [MockURLProtocol.self]
+        config.protocolClasses = [ContactMockURLProtocol.self]
         return URLSession(configuration: config)
     }
 
@@ -17,7 +41,7 @@ struct ContactTests {
             apiToken: "test_token",
             appId: "app_test",
             environment: "staging",
-            enableDebugLogs: false
+            debugLevel: .default
         )
         return JishuClient(configuration: config, session: makeSession())
     }
@@ -31,9 +55,45 @@ struct ContactTests {
         )!
     }
 
+    private func requestBodyData(from request: URLRequest?) throws -> Data {
+        let request = try #require(request)
+        if let body = request.httpBody {
+            return body
+        }
+        if let stream = request.httpBodyStream {
+            return try readBody(from: stream)
+        }
+        throw NSError(domain: "ContactTests", code: 1, userInfo: [
+            NSLocalizedDescriptionKey: "Expected request body data"
+        ])
+    }
+
+    private func readBody(from stream: InputStream) throws -> Data {
+        stream.open()
+        defer { stream.close() }
+
+        var data = Data()
+        let bufferSize = 1024
+        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+        defer { buffer.deallocate() }
+
+        while stream.hasBytesAvailable {
+            let count = stream.read(buffer, maxLength: bufferSize)
+            if count < 0 {
+                throw stream.streamError ?? URLError(.cannotDecodeRawData)
+            }
+            if count == 0 {
+                break
+            }
+            data.append(buffer, count: count)
+        }
+
+        return data
+    }
+
     @Test("sendContactMessage succeeds on 201")
     func succeeds201() async throws {
-        MockURLProtocol.requestHandler = { _ in
+        ContactMockURLProtocol.requestHandler = { _ in
             (makeHTTPResponse(status: 201), Data())
         }
         let client = makeClient()
@@ -45,7 +105,7 @@ struct ContactTests {
 
     @Test("sendContactMessage succeeds on 200")
     func succeeds200() async throws {
-        MockURLProtocol.requestHandler = { _ in
+        ContactMockURLProtocol.requestHandler = { _ in
             (makeHTTPResponse(status: 200), Data())
         }
         let client = makeClient()
@@ -57,7 +117,7 @@ struct ContactTests {
 
     @Test("sendContactMessage throws httpError on 429")
     func throws429() async throws {
-        MockURLProtocol.requestHandler = { _ in
+        ContactMockURLProtocol.requestHandler = { _ in
             (makeHTTPResponse(status: 429), Data())
         }
         let client = makeClient()
@@ -75,7 +135,7 @@ struct ContactTests {
     @Test("sendContactMessage retries once on 500 then succeeds")
     func retries500() async throws {
         var callCount = 0
-        MockURLProtocol.requestHandler = { _ in
+        ContactMockURLProtocol.requestHandler = { _ in
             callCount += 1
             return callCount == 1
                 ? (makeHTTPResponse(status: 500), Data())
@@ -92,7 +152,7 @@ struct ContactTests {
     @Test("sendContactMessage targets correct URL and omits auth header")
     func requestURLAndNoAuth() async throws {
         var capturedRequest: URLRequest?
-        MockURLProtocol.requestHandler = { request in
+        ContactMockURLProtocol.requestHandler = { request in
             capturedRequest = request
             return (makeHTTPResponse(status: 201), Data())
         }
@@ -109,7 +169,7 @@ struct ContactTests {
     @Test("sendContactMessage sanitizes blank optional fields to nil")
     func sanitizesBlankFields() async throws {
         var capturedRequest: URLRequest?
-        MockURLProtocol.requestHandler = { request in
+        ContactMockURLProtocol.requestHandler = { request in
             capturedRequest = request
             return (makeHTTPResponse(status: 201), Data())
         }
@@ -123,7 +183,7 @@ struct ContactTests {
             ),
             appId: "app_test"
         )
-        let bodyData = try #require(capturedRequest?.httpBody)
+        let bodyData = try requestBodyData(from: capturedRequest)
         struct DecodedBody: Decodable {
             let senderName: String?
             let senderEmail: String
@@ -140,7 +200,7 @@ struct ContactTests {
     @Test("sendContactMessage preserves non-blank optional fields after trimming")
     func preservesTrimmedOptionalFields() async throws {
         var capturedRequest: URLRequest?
-        MockURLProtocol.requestHandler = { request in
+        ContactMockURLProtocol.requestHandler = { request in
             capturedRequest = request
             return (makeHTTPResponse(status: 201), Data())
         }
@@ -154,7 +214,7 @@ struct ContactTests {
             ),
             appId: "app_test"
         )
-        let bodyData = try #require(capturedRequest?.httpBody)
+        let bodyData = try requestBodyData(from: capturedRequest)
         struct DecodedBody: Decodable {
             let senderName: String?
             let subject: String?
@@ -167,7 +227,7 @@ struct ContactTests {
     @Test("sendContactMessage encodes all fields in request body")
     func encodesAllFields() async throws {
         var capturedRequest: URLRequest?
-        MockURLProtocol.requestHandler = { request in
+        ContactMockURLProtocol.requestHandler = { request in
             capturedRequest = request
             return (makeHTTPResponse(status: 201), Data())
         }
@@ -181,7 +241,7 @@ struct ContactTests {
             ),
             appId: "app_test"
         )
-        let bodyData = try #require(capturedRequest?.httpBody)
+        let bodyData = try requestBodyData(from: capturedRequest)
         struct DecodedBody: Decodable {
             let senderName: String?
             let senderEmail: String
