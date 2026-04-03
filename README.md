@@ -566,7 +566,7 @@ All tests should pass. The test suite covers:
 |---|---|
 | `DeviceIDStore` | UUID generation, persistence, isolation between suites |
 | `AccessResult decoding` | Full response, `matchType: none`, null fields, ISO 8601 dates |
-| `AccessCache` | Cache hit/miss, negative result exclusion, expiry, 5-minute cap |
+| `AccessCache` | Cache hit/miss, negative result exclusion, expiry, 30-minute cap |
 | `JishuClient` | 200 success, 401 no-retry, 500 retry, retry-then-succeed, auth header |
 | `Contact` | 201/200 success, 429 error, 500 retry, correct URL and no auth header, body encoding |
 
