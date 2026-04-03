@@ -19,12 +19,12 @@ actor AccessCache {
 
     func set(key: String, result: AccessResult) {
         guard result.granted else { return }
-        let fiveMinutesFromNow = Date().addingTimeInterval(300)
+        let thirtyMinutesFromNow = Date().addingTimeInterval(1800)
         let expiry: Date
         if let expiresAt = result.expiresAt {
-            expiry = min(expiresAt, fiveMinutesFromNow)
+            expiry = min(expiresAt, thirtyMinutesFromNow)
         } else {
-            expiry = fiveMinutesFromNow
+            expiry = thirtyMinutesFromNow
         }
         store[key] = Entry(result: result, expiry: expiry)
     }

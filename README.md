@@ -153,6 +153,8 @@ do {
 | `subject` | `String?` | No | Shown as the message subject line |
 | `userId` | `String?` | No | Automatically filled with `Jishu.displayUserID` when `nil`. Lets the app owner add this sender to a promo grant directly from the dashboard. |
 
+The SDK automatically includes `platform: "ios"` in every request. The Jishu dashboard displays an **iOS** badge on each message so you can tell at a glance which platform the sender is on — no action required on your side.
+
 ```swift
 // All fields
 let message = ContactMessage(
@@ -564,7 +566,7 @@ All tests should pass. The test suite covers:
 |---|---|
 | `DeviceIDStore` | UUID generation, persistence, isolation between suites |
 | `AccessResult decoding` | Full response, `matchType: none`, null fields, ISO 8601 dates |
-| `AccessCache` | Cache hit/miss, negative result exclusion, expiry, 5-minute cap |
+| `AccessCache` | Cache hit/miss, negative result exclusion, expiry, 30-minute cap |
 | `JishuClient` | 200 success, 401 no-retry, 500 retry, retry-then-succeed, auth header |
 | `Contact` | 201/200 success, 429 error, 500 retry, correct URL and no auth header, body encoding |
 
