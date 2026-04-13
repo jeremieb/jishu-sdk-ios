@@ -10,18 +10,47 @@ import Jishu
 
 @main
 struct App_ExampleApp: App {
-    
+    private let isConfigured: Bool
+
     init() {
+        guard let config = AppConfiguration.load() else {
+            isConfigured = false
+            return
+        }
+
+        let environment: String? = config.baseURL.host?.contains("staging") == true ? "staging" : nil
+
         Jishu.configure(
-            baseURL: URL(string: "https://staging.jishu.page")!,
-            apiToken: "YOUR_API_TOKEN",
-            appId: "YOUR_APP_ID"
+            baseURL: config.baseURL,
+            apiToken: config.apiToken,
+            appId: config.appID,
+            environment: environment,
+            debugLevel: .verbose
         )
+        isConfigured = true
     }
-    
+
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            if isConfigured {
+                ContentView()
+            } else {
+                ConfigurationErrorView()
+            }
         }
+    }
+}
+
+private struct ConfigurationErrorView: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            Text("Missing Jishu configuration")
+                .font(.headline)
+            Text("Set credentials in ExampleAppConfig.swift, environment variables, or Info.plist.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding()
     }
 }
