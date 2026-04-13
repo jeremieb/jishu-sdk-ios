@@ -247,11 +247,19 @@ struct ContactTests {
             let senderEmail: String
             let subject: String?
             let body: String
+            let platform: String
+            let osName: String
+            let osVersion: String
+            let deviceName: String
         }
         let decoded = try JSONDecoder().decode(DecodedBody.self, from: bodyData)
         #expect(decoded.senderName == "Alice")
         #expect(decoded.senderEmail == "alice@example.com")
         #expect(decoded.subject == "Hello")
         #expect(decoded.body == "World")
+        #expect(decoded.platform == "ios")
+        #expect(decoded.osName.isEmpty == false)
+        #expect(decoded.osVersion.isEmpty == false)
+        #expect(decoded.deviceName.isEmpty == false)
     }
 }

@@ -167,13 +167,17 @@ struct JishuClient: Sendable {
         var request = URLRequest(url: url, timeoutInterval: 10)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let meta = deviceMetaInfo()
         let body = ContactMessageBody(
             senderName: message.senderName,
             senderEmail: message.senderEmail,
             subject: message.subject,
             body: message.body,
-            userId: message.userId,  // filled by sanitized(deviceUserID:)
-            platform: "ios"
+            userId: message.userId,// filled by sanitized(deviceUserID:)
+            platform: "ios",
+            osName: meta.osName,
+            osVersion: meta.osVersion,
+            deviceName: meta.deviceName
         )
         request.httpBody = try JSONEncoder().encode(body)
         return request
@@ -241,7 +245,17 @@ struct JishuClient: Sendable {
         var request = URLRequest(url: url, timeoutInterval: 10)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(SubmitProposalBody(title: title, description: description, voterToken: voterToken))
+        let meta = deviceMetaInfo()
+        request.httpBody = try JSONEncoder().encode(
+            SubmitProposalBody(
+                title: title,
+                description: description,
+                voterToken: voterToken,
+                osName: meta.osName,
+                osVersion: meta.osVersion,
+                deviceName: meta.deviceName
+            )
+        )
         return request
     }
 
@@ -255,7 +269,15 @@ struct JishuClient: Sendable {
         var request = URLRequest(url: url, timeoutInterval: 10)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(VoteBody(voterToken: voterToken))
+        let meta = deviceMetaInfo()
+        request.httpBody = try JSONEncoder().encode(
+            VoteBody(
+                voterToken: voterToken,
+                osName: meta.osName,
+                osVersion: meta.osVersion,
+                deviceName: meta.deviceName
+            )
+        )
         return request
     }
 
@@ -305,15 +327,24 @@ private struct SubmitProposalBody: Encodable {
     let title: String
     let description: String?
     let voterToken: String
+    let osName: String
+    let osVersion: String
+    let deviceName: String
     enum CodingKeys: String, CodingKey {
-        case title, description
+        case title, description, osName, osVersion, deviceName
         case voterToken = "voter_token"
     }
 }
 
 private struct VoteBody: Encodable {
     let voterToken: String
-    enum CodingKeys: String, CodingKey { case voterToken = "voter_token" }
+    let osName: String
+    let osVersion: String
+    let deviceName: String
+    enum CodingKeys: String, CodingKey {
+        case osName, osVersion, deviceName
+        case voterToken = "voter_token"
+    }
 }
 
 private struct ContactMessageBody: Encodable {
@@ -323,4 +354,7 @@ private struct ContactMessageBody: Encodable {
     let body: String
     let userId: String?
     let platform: String
+    let osName: String
+    let osVersion: String
+    let deviceName: String
 }
