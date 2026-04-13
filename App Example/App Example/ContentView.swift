@@ -6,47 +6,50 @@
 //
 
 import SwiftUI
-import Jishu
 
 struct ContentView: View {
-    
-    @State private var userID: String = Jishu.displayUserID
-    @State private var isGranted: Bool = false
-    
+    @StateObject private var viewModel = MainViewModel()
+
     var body: some View {
-        VStack {
+        VStack(alignment: .leading, spacing: 16) {
             GroupBox(label: Label("Jishu User ID", systemImage: "person.fill")) {
-                Text(userID)
-                    .font(.footnote)
+                Text(viewModel.userID)
+                    .font(.footnote.monospaced())
                     .textSelection(.enabled)
-                HStack {
-                    if isGranted {
-                        Text("Access premium granted")
-                            .foregroundStyle(Color.green)
-                    } else {
-                        Text("Access premium refused")
-                            .foregroundStyle(Color.red)
-                    }
+            }
+
+            GroupBox(label: Label("Optional externalUserId", systemImage: "person.badge.key")) {
+                TextField("externalUserId (leave empty to use displayUserID)", text: $viewModel.externalUserID)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled(true)
+            }
+
+            Button {
+                viewModel.checkGrant()
+            } label: {
+                if viewModel.isCheckingGrant {
+                    ProgressView()
+                        .frame(maxWidth: .infinity)
+                } else {
+                    Text("Check Access")
+                        .frame(maxWidth: .infinity)
                 }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(viewModel.isCheckingGrant)
+
+            GroupBox(label: Label("Result", systemImage: "checkmark.shield")) {
+                Text(viewModel.isGranted ? "Access premium granted" : "Access premium refused")
+                    .foregroundStyle(viewModel.isGranted ? Color.green : Color.red)
+
+                Text(viewModel.grantCheckMessage)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .padding(.top, 4)
             }
         }
         .padding()
-        .onAppear {
-            update()
-        }
-    }
-    
-    private func update() {
-        Task {
-            do {
-                let result = try await Jishu.checkAccess()
-                if result.granted {
-                    isGranted = true
-                }
-            } catch {
-                print("‼️ Jishu: Something went wrong — \(error)")
-            }
-        }
     }
 }
 

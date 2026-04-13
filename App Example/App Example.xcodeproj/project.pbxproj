@@ -101,7 +101,7 @@
 			mainGroup = 02397E572F73036200D46ACD;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				02397E772F7306DC00D46ACD /* XCLocalSwiftPackageReference "../../jishu-sdk-ios" */,
+				02397E772F7306DC00D46ACD /* XCLocalSwiftPackageReference ".." */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 02397E612F73036200D46ACD /* Products */;
@@ -345,15 +345,17 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		02397E772F7306DC00D46ACD /* XCLocalSwiftPackageReference "../../jishu-sdk-ios" */ = {
+		02397E772F7306DC00D46ACD /* XCLocalSwiftPackageReference ".." */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = "../../jishu-sdk-ios";
+			relativePath = "..";
 		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		02397E782F7306DC00D46ACD /* Jishu */ = {
 			isa = XCSwiftPackageProductDependency;
+			package = 02397E772F7306DC00D46ACD /* XCLocalSwiftPackageReference ".." */;
+
 			productName = Jishu;
 		};
 /* End XCSwiftPackageProductDependency section */

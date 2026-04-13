@@ -66,6 +66,42 @@ private func makeHTTPResponse(status: Int) -> HTTPURLResponse {
     )!
 }
 
+private func requestBodyData(from request: URLRequest?) throws -> Data {
+    let request = try #require(request)
+    if let body = request.httpBody {
+        return body
+    }
+    if let stream = request.httpBodyStream {
+        return try readBody(from: stream)
+    }
+    throw NSError(domain: "JishuClientTests", code: 1, userInfo: [
+        NSLocalizedDescriptionKey: "Expected request body data"
+    ])
+}
+
+private func readBody(from stream: InputStream) throws -> Data {
+    stream.open()
+    defer { stream.close() }
+
+    var data = Data()
+    let bufferSize = 1024
+    let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+    defer { buffer.deallocate() }
+
+    while stream.hasBytesAvailable {
+        let count = stream.read(buffer, maxLength: bufferSize)
+        if count < 0 {
+            throw stream.streamError ?? URLError(.cannotDecodeRawData)
+        }
+        if count == 0 {
+            break
+        }
+        data.append(buffer, count: count)
+    }
+
+    return data
+}
+
 // MARK: - Tests
 
 @Suite("JishuClient", .serialized)
@@ -143,4 +179,96 @@ struct JishuClientTests {
         _ = try await client.checkAccess(externalUserId: nil, deviceId: "device_1")
         #expect(capturedRequest?.value(forHTTPHeaderField: "Authorization") == "Bearer test_token")
     }
+
+    @Test("submitProposal encodes device metadata in request body")
+    func submitProposalEncodesDeviceMetadata() async throws {
+        var capturedRequest: URLRequest?
+        let responseJSON = """
+        {
+          "proposal": {
+            "id": "prop_new",
+            "title": "Dark mode",
+            "description": "Please add dark mode",
+            "status": "open",
+            "voteCount": 1,
+            "createdAt": "2026-03-28T20:35:11.844Z"
+          }
+        }
+        """.data(using: .utf8)!
+        MockURLProtocol.requestHandler = { request in
+            capturedRequest = request
+            return (makeHTTPResponse(status: 201), responseJSON)
+        }
+        let client = makeClient()
+        _ = try await client.submitProposal(
+            appId: "app_test",
+            title: "Dark mode",
+            description: "Please add dark mode",
+            voterToken: "vote_token_123"
+        )
+        let request = try #require(capturedRequest)
+        #expect(request.url?.path == "/api/apps/app_test/proposals")
+        #expect(request.httpMethod == "POST")
+        let bodyData = try requestBodyData(from: capturedRequest)
+        struct DecodedBody: Decodable {
+            let title: String
+            let description: String?
+            let voterToken: String
+            let osName: String
+            let osVersion: String
+            let deviceName: String
+            enum CodingKeys: String, CodingKey {
+                case title, description, osName, osVersion, deviceName
+                case voterToken = "voter_token"
+            }
+        }
+        let decoded = try JSONDecoder().decode(DecodedBody.self, from: bodyData)
+        #expect(decoded.title == "Dark mode")
+        #expect(decoded.description == "Please add dark mode")
+        #expect(decoded.voterToken == "vote_token_123")
+        #expect(decoded.osName.isEmpty == false)
+        #expect(decoded.osVersion.isEmpty == false)
+        #expect(decoded.deviceName.isEmpty == false)
+    }
+
+
+    @Test("voteOnProposal encodes device metadata in request body")
+    func voteOnProposalEncodesDeviceMetadata() async throws {
+        var capturedRequest: URLRequest?
+        let responseJSON = """
+        {
+          "voteCount": 7
+        }
+        """.data(using: .utf8)!
+        MockURLProtocol.requestHandler = { request in
+            capturedRequest = request
+            return (makeHTTPResponse(status: 200), responseJSON)
+        }
+        let client = makeClient()
+        _ = try await client.voteOnProposal(
+            appId: "app_test",
+            proposalId: "prop_123",
+            voterToken: "vote_token_456"
+        )
+        let request = try #require(capturedRequest)
+        #expect(request.url?.path == "/api/apps/app_test/proposals/prop_123/vote")
+        #expect(request.httpMethod == "POST")
+        let bodyData = try requestBodyData(from: capturedRequest)
+        struct DecodedBody: Decodable {
+            let voterToken: String
+            let osName: String
+            let osVersion: String
+            let deviceName: String
+            enum CodingKeys: String, CodingKey {
+                case osName, osVersion, deviceName
+                case voterToken = "voter_token"
+            }
+        }
+        let decoded = try JSONDecoder().decode(DecodedBody.self, from: bodyData)
+        #expect(decoded.voterToken == "vote_token_456")
+        #expect(decoded.osName.isEmpty == false)
+        #expect(decoded.osVersion.isEmpty == false)
+        #expect(decoded.deviceName.isEmpty == false)
+    }
+
 }

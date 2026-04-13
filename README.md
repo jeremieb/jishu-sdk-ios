@@ -4,7 +4,7 @@
 
 A lightweight Swift package for [Jishu](https://jishu.page) — check promo access grants, send contact form messages, and collect feature proposals from iOS apps.
 
-- **Current version:** `1.0.0`
+- **Current version:** `0.1.4`
 - **Minimum platform:** iOS 15
 - **Swift:** 6.0+
 
@@ -43,14 +43,14 @@ Jishu promo access lets you grant specific users or devices early or exclusive a
    ```
    https://github.com/jeremieberduck/jishu-sdk-ios
    ```
-3. Select **Up to Next Major Version** starting from `1.0.0`.
+3. Select **Up to Next Major Version** starting from `0.1.4`.
 4. Add **Jishu** to your app target.
 
 ### Swift Package Manager (Package.swift)
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/jeremieberduck/jishu-sdk-ios", from: "1.0.0"),
+    .package(url: "https://github.com/jeremieberduck/jishu-sdk-ios", from: "0.1.4"),
 ],
 targets: [
     .target(
@@ -153,7 +153,7 @@ do {
 | `subject` | `String?` | No | Shown as the message subject line |
 | `userId` | `String?` | No | Automatically filled with `Jishu.displayUserID` when `nil`. Lets the app owner add this sender to a promo grant directly from the dashboard. |
 
-The SDK automatically includes `platform: "ios"` in every request. The Jishu dashboard displays an **iOS** badge on each message so you can tell at a glance which platform the sender is on — no action required on your side.
+The SDK automatically includes `platform: "ios"`, `osName`, `osVersion`, and `deviceName` in every contact message request. `deviceName` carries the raw Apple hardware identifier such as `iPhone17,1`; the Jishu backend resolves that into a friendly marketing name for the dashboard.
 
 ```swift
 // All fields
@@ -257,6 +257,14 @@ let created = try await Jishu.submitProposal(
 let updatedVoteCount = try await Jishu.vote(on: created)
 ```
 
+The feedback endpoints send these metadata fields automatically:
+
+- `osName` — for example `iOS`
+- `osVersion` — for example `18.3.2`
+- `deviceName` — raw Apple hardware identifier such as `iPhone17,1`
+
+The Jishu backend resolves `deviceName` into a friendly marketing name for dashboard display, so the SDK does not bundle a local device-name lookup table.
+
 ### Typical app integration
 
 The simplest integration is:
@@ -337,6 +345,7 @@ public static func vote(on proposal: JishuProposal) async throws -> Int
 ### Behavior notes
 
 - `submitProposal` and `vote(on:)` use a stable device-scoped voter token managed by the SDK.
+- Proposal submissions and votes include `osName`, `osVersion`, and the raw Apple hardware identifier in `deviceName`.
 - The feedback endpoints are public and rate-limited by the backend.
 - Duplicate votes from the same device are ignored by the server.
 - The SDK retries once on transport failures or 5xx responses, matching the contact form behavior.
@@ -526,8 +535,8 @@ The package is versioned via **git tags**. Swift Package Manager requires a full
 ### Tag and push
 
 ```bash
-git tag 1.0.0
-git push origin 1.0.0
+git tag 0.1.4
+git push origin 0.1.4
 ```
 
 Or push all local tags at once:
