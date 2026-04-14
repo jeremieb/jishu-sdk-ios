@@ -1,0 +1,37 @@
+import Foundation
+
+/// Review prompt configuration fetched from the Jishu dashboard.
+public struct ReviewConfig: Codable, Sendable {
+    public let enabled: Bool
+    public let triggerMode: String
+    public let minLaunches: Int
+    public let minDaysSinceInstall: Int
+    public let triggerLogic: String
+    public let cooldownDays: Int
+    public let maxPromptsPerDevice: Int
+    public let promptTitle: String
+    public let promptQuestion: String
+    /// Ratings >= this value route to the native App Store review dialog.
+    /// Ratings below route to the feedback text input.
+    public let ratingThreshold: Int
+    public let feedbackPrompt: String
+    public let captureFeedbackOnNegative: Bool
+}
+
+extension ReviewConfig {
+    /// Used as a fallback when the server config cannot be fetched during a manual trigger.
+    static let manualFallback = ReviewConfig(
+        enabled: true,
+        triggerMode: "manual",
+        minLaunches: 0,
+        minDaysSinceInstall: 0,
+        triggerLogic: "OR",
+        cooldownDays: 0,
+        maxPromptsPerDevice: Int.max,
+        promptTitle: "Enjoying the app?",
+        promptQuestion: "We'd love to hear what you think.",
+        ratingThreshold: 4,
+        feedbackPrompt: "What could we improve?",
+        captureFeedbackOnNegative: true
+    )
+}

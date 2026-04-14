@@ -49,39 +49,123 @@ struct JishuClient: Sendable {
         }
     }
 
+    // MARK: - Review
+
+    /// Fetch review config, using a 1-hour in-process TTL backed by ReviewStore.
+    func fetchReviewConfig(appId: String, store: ReviewStore) async throws -> ReviewConfig {
+        if let cached = await store.cachedConfig() {
+            return cached
+        }
+        let request = try buildReviewConfigRequest(appId: appId)
+        let config = try await performDecoding(request, retriesLeft: 1) { data in
+            try Self.plainDecoder.decode(ReviewConfig.self, from: data)
+        }
+        await store.cacheConfig(config)
+        return config
+    }
+
+    /// Fire-and-forget event log. Swallows all errors.
+    func logReviewEvent(appId: String, eventType: String, platform: String, rating: Int?, feedback: String? = nil) async {
+        do {
+            let request = try buildReviewEventRequest(appId: appId, eventType: eventType, platform: platform, rating: rating, feedback: feedback)
+            try await performContact(request, retriesLeft: 0)
+        } catch {
+            logger.error("Review event error (\(eventType)): \(error.localizedDescription)")
+        }
+    }
+
+    /// Fire-and-forget feedback submission. Swallows all errors.
+    func sendReviewFeedback(appId: String, body: String) async {
+        do {
+            let request = try buildReviewFeedbackRequest(appId: appId, body: body)
+            try await performContact(request, retriesLeft: 1)
+        } catch {
+            logger.error("Review feedback error: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Private review builders
+
+    private func buildReviewConfigRequest(appId: String) throws -> URLRequest {
+        let base = configuration.baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let encodedAppId = appId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? appId
+        guard let url = URL(string: "\(base)/api/apps/\(encodedAppId)/review/config") else {
+            throw JishuError.invalidBaseURL
+        }
+        var request = URLRequest(url: url, timeoutInterval: 10)
+        request.httpMethod = "GET"
+        return request
+    }
+
+    private func buildReviewEventRequest(appId: String, eventType: String, platform: String, rating: Int?, feedback: String?) throws -> URLRequest {
+        let base = configuration.baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let encodedAppId = appId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? appId
+        guard let url = URL(string: "\(base)/api/apps/\(encodedAppId)/review/events") else {
+            throw JishuError.invalidBaseURL
+        }
+        var request = URLRequest(url: url, timeoutInterval: 10)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(ReviewEventBody(eventType: eventType, platform: platform, rating: rating, feedback: feedback))
+        return request
+    }
+
+    private func buildReviewFeedbackRequest(appId: String, body: String) throws -> URLRequest {
+        let base = configuration.baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let encodedAppId = appId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? appId
+        guard let url = URL(string: "\(base)/api/apps/\(encodedAppId)/review/feedback") else {
+            throw JishuError.invalidBaseURL
+        }
+        var request = URLRequest(url: url, timeoutInterval: 10)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let meta = deviceMetaInfo()
+        request.httpBody = try JSONEncoder().encode(ReviewFeedbackBody(
+            body: body,
+            platform: "ios",
+            osName: meta.osName,
+            osVersion: meta.osVersion,
+            deviceName: meta.deviceName
+        ))
+        return request
+    }
+
     // MARK: - Private
 
     private func perform(_ request: URLRequest, retriesLeft: Int) async throws -> AccessResult {
-        logger.verbose("Sending \(request.httpMethod ?? "GET") \(request.url?.absoluteString ?? "")")
+        let method = request.httpMethod ?? "GET"
+        let url = request.url?.absoluteString ?? ""
+        logger.request(method: method, url: url)
         do {
             let (data, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse else {
                 throw JishuError.invalidBaseURL
             }
-            logger.verbose("HTTP \(http.statusCode)")
+            logger.response(status: http.statusCode, method: method, url: url)
 
+            logger.responseBody(data)
             switch http.statusCode {
             case 200:
                 return try decode(data)
             case 400..<500:
-                logger.error("HTTP error \(http.statusCode) — \(request.url?.absoluteString ?? "")")
+                logger.error("HTTP \(http.statusCode) — \(url)")
                 throw JishuError.httpError(http.statusCode)
             case 500...:
                 if retriesLeft > 0 {
-                    logger.error("Server error \(http.statusCode), retrying...")
+                    logger.retry("Server error \(http.statusCode), retrying \(url)")
                     return try await perform(request, retriesLeft: retriesLeft - 1)
                 }
                 logger.error("Server error \(http.statusCode) — no retries left")
                 throw JishuError.httpError(http.statusCode)
             default:
-                logger.error("Unexpected HTTP status \(http.statusCode)")
+                logger.error("Unexpected status \(http.statusCode) — \(url)")
                 throw JishuError.httpError(http.statusCode)
             }
         } catch let error as JishuError {
             throw error
         } catch {
             if retriesLeft > 0 {
-                logger.error("Transport error, retrying: \(error.localizedDescription)")
+                logger.retry("Transport error, retrying \(url): \(error.localizedDescription)")
                 return try await perform(request, retriesLeft: retriesLeft - 1)
             }
             logger.error("Transport error: \(error.localizedDescription)")
@@ -122,38 +206,40 @@ struct JishuClient: Sendable {
     }
 
     private func performContact(_ request: URLRequest, retriesLeft: Int) async throws {
-        logger.verbose("Sending \(request.httpMethod ?? "GET") \(request.url?.absoluteString ?? "")")
+        let method = request.httpMethod ?? "POST"
+        let url = request.url?.absoluteString ?? ""
+        logger.request(method: method, url: url)
         do {
             let (_, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse else {
                 throw JishuError.invalidBaseURL
             }
-            logger.verbose("Contact HTTP \(http.statusCode)")
+            logger.response(status: http.statusCode, method: method, url: url)
             switch http.statusCode {
             case 200, 201:
                 return
             case 400..<500:
-                logger.error("Contact HTTP error \(http.statusCode) — \(request.url?.absoluteString ?? "")")
+                logger.error("HTTP \(http.statusCode) — \(url)")
                 throw JishuError.httpError(http.statusCode)
             case 500...:
                 if retriesLeft > 0 {
-                    logger.error("Contact server error \(http.statusCode), retrying...")
+                    logger.retry("Server error \(http.statusCode), retrying \(url)")
                     return try await performContact(request, retriesLeft: retriesLeft - 1)
                 }
-                logger.error("Contact server error \(http.statusCode) — no retries left")
+                logger.error("Server error \(http.statusCode) — no retries left")
                 throw JishuError.httpError(http.statusCode)
             default:
-                logger.error("Contact unexpected HTTP status \(http.statusCode)")
+                logger.error("Unexpected status \(http.statusCode) — \(url)")
                 throw JishuError.httpError(http.statusCode)
             }
         } catch let error as JishuError {
             throw error
         } catch {
             if retriesLeft > 0 {
-                logger.error("Contact transport error, retrying: \(error.localizedDescription)")
+                logger.retry("Transport error, retrying \(url): \(error.localizedDescription)")
                 return try await performContact(request, retriesLeft: retriesLeft - 1)
             }
-            logger.error("Contact transport error: \(error.localizedDescription)")
+            logger.error("Transport error: \(error.localizedDescription)")
             throw error
         }
     }
@@ -189,35 +275,38 @@ struct JishuClient: Sendable {
         retriesLeft: Int,
         decode: (Data) throws -> T
     ) async throws -> T {
-        logger.verbose("Sending \(request.httpMethod ?? "GET") \(request.url?.absoluteString ?? "")")
+        let method = request.httpMethod ?? "GET"
+        let url = request.url?.absoluteString ?? ""
+        logger.request(method: method, url: url)
         do {
             let (data, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse else {
                 throw JishuError.invalidBaseURL
             }
-            logger.verbose("HTTP \(http.statusCode)")
+            logger.response(status: http.statusCode, method: method, url: url)
+            logger.responseBody(data)
             switch http.statusCode {
             case 200, 201:
                 do { return try decode(data) } catch { throw JishuError.decodingFailed(error) }
             case 400..<500:
-                logger.error("HTTP error \(http.statusCode) — \(request.url?.absoluteString ?? "")")
+                logger.error("HTTP \(http.statusCode) — \(url)")
                 throw JishuError.httpError(http.statusCode)
             case 500...:
                 if retriesLeft > 0 {
-                    logger.error("Server error \(http.statusCode), retrying...")
+                    logger.retry("Server error \(http.statusCode), retrying \(url)")
                     return try await performDecoding(request, retriesLeft: retriesLeft - 1, decode: decode)
                 }
                 logger.error("Server error \(http.statusCode) — no retries left")
                 throw JishuError.httpError(http.statusCode)
             default:
-                logger.error("Unexpected HTTP status \(http.statusCode)")
+                logger.error("Unexpected status \(http.statusCode) — \(url)")
                 throw JishuError.httpError(http.statusCode)
             }
         } catch let error as JishuError {
             throw error
         } catch {
             if retriesLeft > 0 {
-                logger.error("Transport error, retrying: \(error.localizedDescription)")
+                logger.retry("Transport error, retrying \(url): \(error.localizedDescription)")
                 return try await performDecoding(request, retriesLeft: retriesLeft - 1, decode: decode)
             }
             logger.error("Transport error: \(error.localizedDescription)")
@@ -353,6 +442,21 @@ private struct ContactMessageBody: Encodable {
     let subject: String?
     let body: String
     let userId: String?
+    let platform: String
+    let osName: String
+    let osVersion: String
+    let deviceName: String
+}
+
+private struct ReviewEventBody: Encodable {
+    let eventType: String
+    let platform: String
+    let rating: Int?
+    let feedback: String?
+}
+
+private struct ReviewFeedbackBody: Encodable {
+    let body: String
     let platform: String
     let osName: String
     let osVersion: String

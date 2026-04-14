@@ -38,7 +38,7 @@ private func makeSession() -> URLSession {
 
 private func makeClient(enableDebugLogs: Bool = false) -> JishuClient {
     let config = JishuConfiguration(
-        baseURL: URL(string: "https://staging.jishu.page")!,
+        server: .staging,
         apiToken: "test_token",
         appId: "app_test",
         environment: "staging",

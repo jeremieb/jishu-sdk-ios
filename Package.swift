@@ -15,7 +15,8 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "Jishu"
+            name: "Jishu",
+            linkerSettings: [.linkedFramework("StoreKit")]
         ),
         .testTarget(
             name: "JishuTests",

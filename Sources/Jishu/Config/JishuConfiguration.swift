@@ -1,9 +1,11 @@
 import Foundation
 
 struct JishuConfiguration: Sendable {
-    let baseURL: URL
+    let server: JishuEnvironment
     let apiToken: String
     let appId: String
     let environment: String?
     let debugLevel: JishuDebugLevel
+
+    var baseURL: URL { server.baseURL }
 }

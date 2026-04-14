@@ -7,10 +7,13 @@
 
 import SwiftUI
 import Jishu
+import UIKit
 
 @main
 struct App_ExampleApp: App {
+    @Environment(\.scenePhase) private var scenePhase
     private let isConfigured: Bool
+    @State private var didTrackLaunch = false
 
     init() {
         guard let config = AppConfiguration.load() else {
@@ -18,13 +21,10 @@ struct App_ExampleApp: App {
             return
         }
 
-        let environment: String? = config.baseURL.host?.contains("staging") == true ? "staging" : nil
-
         Jishu.configure(
-            baseURL: config.baseURL,
+            server: config.server,
             apiToken: config.apiToken,
             appId: config.appID,
-            environment: environment,
             debugLevel: .verbose
         )
         isConfigured = true
@@ -34,10 +34,32 @@ struct App_ExampleApp: App {
         WindowGroup {
             if isConfigured {
                 ContentView()
+                    .task {
+                        await trackLaunchIfPossible()
+                    }
+                    .onChange(of: scenePhase) { _, newPhase in
+                        guard newPhase == .active else { return }
+                        Task {
+                            await trackLaunchIfPossible()
+                        }
+                    }
             } else {
                 ConfigurationErrorView()
             }
         }
+    }
+
+    @MainActor
+    private func trackLaunchIfPossible() async {
+        guard !didTrackLaunch else { return }
+        guard let activeScene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first(where: { $0.activationState == .foregroundActive }) else {
+            return
+        }
+
+        didTrackLaunch = true
+        await Jishu.trackLaunch(in: activeScene)
     }
 }
 

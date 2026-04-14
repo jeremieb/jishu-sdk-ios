@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import Jishu
+import UIKit
 
 @MainActor
 final class MainViewModel: ObservableObject {
@@ -9,6 +10,8 @@ final class MainViewModel: ObservableObject {
     @Published var isGranted: Bool = false
     @Published var grantCheckMessage: String = "Run a grant check to see details."
     @Published var isCheckingGrant: Bool = false
+    @Published var isRequestingReview: Bool = false
+    @Published var reviewRequestMessage: String = "Tap the button to request review if eligible."
     @Published var isShowingMessageSheet: Bool = false
     @Published var isShowingFeedbackSheet: Bool = false
 
@@ -43,6 +46,29 @@ final class MainViewModel: ObservableObject {
                 isCheckingGrant = false
                 grantCheckMessage = "Grant check failed: \(error.localizedDescription)"
             }
+        }
+    }
+
+    func requestReviewIfEligible() {
+        isRequestingReview = true
+
+        Task {
+            let activeScene = UIApplication.shared.connectedScenes
+                .compactMap { $0 as? UIWindowScene }
+                .first(where: { $0.activationState == .foregroundActive })
+
+            guard let activeScene else {
+                isRequestingReview = false
+                reviewRequestMessage = "No active window scene found, cannot present review UI."
+                return
+            }
+
+            let shown = await Jishu.requestReviewIfEligible(in: activeScene)
+
+            isRequestingReview = false
+            reviewRequestMessage = shown
+                ? "Review flow shown."
+                : "Review flow not shown (not eligible right now)."
         }
     }
 }
