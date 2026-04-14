@@ -1,18 +1,14 @@
 import Foundation
 import Darwin
-#if canImport(UIKit)
-import UIKit
-#endif
 
 func deviceMetaInfo() -> (osName: String, osVersion: String, deviceName: String) {
-    #if canImport(UIKit)
-    let osName = UIDevice.current.systemName
-    let osVersion = UIDevice.current.systemVersion
-    #else
     let version = ProcessInfo.processInfo.operatingSystemVersion
+    #if canImport(UIKit)
+    let osName = "iOS"
+    #else
     let osName = "macOS"
-    let osVersion = "\(version.majorVersion).\(version.minorVersion).\(version.patchVersion)"
     #endif
+    let osVersion = "\(version.majorVersion).\(version.minorVersion).\(version.patchVersion)"
 
     let identifier = hardwareIdentifier()
     return (

@@ -4,7 +4,7 @@
 
 A lightweight Swift package for [Jishu](https://jishu.page) — check promo access grants, send contact form messages, and collect feature proposals from iOS apps.
 
-- **Current version:** `0.1.4`
+- **Current version:** `0.1.5`
 - **Minimum platform:** iOS 15
 - **Swift:** 6.0+
 
@@ -17,14 +17,15 @@ A lightweight Swift package for [Jishu](https://jishu.page) — check promo acce
 3. [Quickstart](#quickstart)
 4. [Contact form](#contact-form)
 5. [Feature feedback](#feature-feedback)
-6. [User identity and `displayUserID`](#user-identity-and-displayuserid)
-7. [Debug logging](#debug-logging)
-8. [Staging smoke test](#staging-smoke-test)
-9. [RevenueCat integration](#revenuecat-integration)
-10. [Reinstall limitation](#reinstall-limitation)
-11. [Security notes](#security-notes)
-12. [Publishing a new version](#publishing-a-new-version)
-13. [Running the tests](#running-the-tests)
+6. [Review prompts](#review-prompts)
+7. [User identity and `displayUserID`](#user-identity-and-displayuserid)
+8. [Debug logging](#debug-logging)
+9. [Staging smoke test](#staging-smoke-test)
+10. [RevenueCat integration](#revenuecat-integration)
+11. [Reinstall limitation](#reinstall-limitation)
+12. [Security notes](#security-notes)
+13. [Publishing a new version](#publishing-a-new-version)
+14. [Running the tests](#running-the-tests)
 
 ---
 
@@ -43,14 +44,14 @@ Jishu promo access lets you grant specific users or devices early or exclusive a
    ```
    https://github.com/jeremieberduck/jishu-sdk-ios
    ```
-3. Select **Up to Next Major Version** starting from `0.1.4`.
+3. Select **Up to Next Major Version** starting from `0.2.0`.
 4. Add **Jishu** to your app target.
 
 ### Swift Package Manager (Package.swift)
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/jeremieberduck/jishu-sdk-ios", from: "0.1.4"),
+    .package(url: "https://github.com/jeremieberduck/jishu-sdk-ios", from: "0.2.0"),
 ],
 targets: [
     .target(
@@ -359,6 +360,123 @@ public static func vote(on proposal: JishuProposal) async throws -> Int
 | `JishuError.httpError(404)` | The configured `appId` does not exist or is inactive |
 | `JishuError.httpError(429)` | Rate limit — too many proposals or votes from the same IP/device window |
 | `JishuError.httpError(500)` | Server error after one retry |
+
+## Review prompts
+
+The review prompt feature intercepts users before they reach the App Store, lets you measure sentiment, routes happy users to the native StoreKit review dialog, and captures negative feedback as a message in your dashboard **User Messages** inbox — labelled **Review Feedback** so you can distinguish it from contact form mail.
+
+### How it works
+
+1. SDK shows your customisable star-rating dialog.
+2. Rating ≥ threshold (default 4) → triggers `SKStoreReviewController` (native iOS prompt).
+3. Rating < threshold (and `captureFeedbackOnNegative` is on) → shows a follow-up text input and sends the feedback silently to your **User Messages** inbox.
+4. All events (shown, dismissed, rating_given, native_requested, feedback_sent) are logged to the Jishu dashboard under **Reviews → Analytics**.
+
+### Dashboard setup
+
+Go to your app in the Jishu dashboard → **Reviews** tab. Configure:
+
+- **Enabled** toggle — must be on for any prompts to fire.
+- **Trigger mode** — `auto` (SDK decides timing) or `manual` (you call `requestReviewIfEligible` at a meaningful moment).
+- **Min launches / Min days since install** — eligibility thresholds.
+- **Cooldown days / Max prompts per device** — prevents over-prompting.
+- **Rating threshold** — ratings at or above this value go to the native dialog; below go to feedback capture.
+
+### Auto mode — `trackLaunch`
+
+Call once per cold app launch. The SDK increments the launch counter, fetches the remote config (cached for 1 hour), and shows the prompt when all eligibility conditions are met.
+
+Place it in `sceneDidBecomeActive` or your SwiftUI `.task` — **not** in every `onAppear`, which fires on every navigation push:
+
+```swift
+// SceneDelegate
+func sceneDidBecomeActive(_ scene: UIScene) {
+    guard let windowScene = scene as? UIWindowScene else { return }
+    Task { await Jishu.trackLaunch(in: windowScene) }
+}
+
+// SwiftUI @main
+@main
+struct MyApp: App {
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+                .task { await Jishu.trackLaunch(in: nil) }
+        }
+    }
+}
+```
+
+> **Important:** Cold start means `applicationDidFinishLaunching` / `init()` of your `@main` struct. If you use `sceneDidBecomeActive`, it fires on every foreground transition — keep a `didTrackLaunch` flag or call it only from your root view's `.task` (which runs once per view lifetime).
+
+### Manual mode — `requestReviewIfEligible`
+
+Use when `triggerMode` is set to `"manual"` in the dashboard. Call at a meaningful moment in your app (e.g. after a successful export, after the user completes a milestone). The SDK still enforces `cooldownDays` and `maxPromptsPerDevice`.
+
+```swift
+// After a milestone
+let shown = await Jishu.requestReviewIfEligible(in: windowScene)
+if shown {
+    // prompt was presented — avoid showing other UI on top
+}
+```
+
+The method always records the launch (sets install date on first call and increments launch count), so you do not need a separate `trackLaunch` call in manual mode.
+
+### Custom UI
+
+By default the SDK shows a `UIAlertController` star-rating dialog. To match your app's design, assign a `JishuReviewUIHandler` before calling `trackLaunch` or `requestReviewIfEligible`:
+
+```swift
+Jishu.reviewUIHandler = MyReviewPresenter()
+```
+
+#### `JishuReviewUIHandler` protocol
+
+```swift
+@MainActor
+public protocol JishuReviewUIHandler: AnyObject {
+    func presentReviewPrompt(title: String, question: String) async -> JishuReviewResponse
+}
+```
+
+Your implementation receives the `promptTitle` and `promptQuestion` strings from the dashboard config and must return a `JishuReviewResponse`:
+
+#### `JishuReviewResponse`
+
+```swift
+public struct JishuReviewResponse: Sendable {
+    public let rating: Int?           // 1–5, nil if dismissed without rating
+    public let dismissed: Bool        // true if the user closed without rating
+    public let feedbackMessage: String? // negative-path free text; nil if not captured
+}
+```
+
+The SDK uses `rating` to decide whether to trigger the native dialog or capture feedback. You do not need to call any SDK method from within your handler — just return the struct.
+
+### Public API
+
+```swift
+// Auto mode — call once per cold launch
+@MainActor
+public static func trackLaunch(in scene: UIWindowScene? = nil) async
+
+// Manual mode — call at a meaningful moment
+@MainActor @discardableResult
+public static func requestReviewIfEligible(in scene: UIWindowScene? = nil) async -> Bool
+
+// Custom UI handler (set before trackLaunch / requestReviewIfEligible)
+public static weak var reviewUIHandler: (any JishuReviewUIHandler)?
+```
+
+### Notes
+
+- `trackLaunch` and `requestReviewIfEligible` are no-ops if `Jishu.configure(...)` has not been called.
+- Network errors fetching the review config are swallowed silently — no prompt is shown if the config cannot be fetched.
+- The `UIWindowScene` parameter is optional. Pass `nil` and the SDK will use `UIApplication.shared.connectedScenes` to find an active scene.
+- Review feedback messages appear in **User Messages** with the label **Review Feedback** and no email address. The Reply button is hidden for these entries.
+
+---
 
 ## User identity and `displayUserID`
 

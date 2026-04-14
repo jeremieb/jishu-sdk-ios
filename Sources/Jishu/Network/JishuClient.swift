@@ -49,6 +49,87 @@ struct JishuClient: Sendable {
         }
     }
 
+    // MARK: - Review
+
+    /// Fetch review config, using a 1-hour in-process TTL backed by ReviewStore.
+    func fetchReviewConfig(appId: String, store: ReviewStore) async throws -> ReviewConfig {
+        if let cached = await store.cachedConfig() {
+            return cached
+        }
+        let request = try buildReviewConfigRequest(appId: appId)
+        let config = try await performDecoding(request, retriesLeft: 1) { data in
+            try Self.plainDecoder.decode(ReviewConfig.self, from: data)
+        }
+        await store.cacheConfig(config)
+        return config
+    }
+
+    /// Fire-and-forget event log. Swallows all errors.
+    func logReviewEvent(appId: String, eventType: String, platform: String, rating: Int?) async {
+        do {
+            let request = try buildReviewEventRequest(appId: appId, eventType: eventType, platform: platform, rating: rating)
+            try await performContact(request, retriesLeft: 0)
+        } catch {
+            logger.error("Review event error (\(eventType)): \(error.localizedDescription)")
+        }
+    }
+
+    /// Fire-and-forget feedback submission. Swallows all errors.
+    func sendReviewFeedback(appId: String, body: String) async {
+        do {
+            let request = try buildReviewFeedbackRequest(appId: appId, body: body)
+            try await performContact(request, retriesLeft: 1)
+        } catch {
+            logger.error("Review feedback error: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Private review builders
+
+    private func buildReviewConfigRequest(appId: String) throws -> URLRequest {
+        let base = configuration.baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let encodedAppId = appId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? appId
+        guard let url = URL(string: "\(base)/api/apps/\(encodedAppId)/review/config") else {
+            throw JishuError.invalidBaseURL
+        }
+        var request = URLRequest(url: url, timeoutInterval: 10)
+        request.httpMethod = "GET"
+        return request
+    }
+
+    private func buildReviewEventRequest(appId: String, eventType: String, platform: String, rating: Int?) throws -> URLRequest {
+        let base = configuration.baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let encodedAppId = appId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? appId
+        guard let url = URL(string: "\(base)/api/apps/\(encodedAppId)/review/events") else {
+            throw JishuError.invalidBaseURL
+        }
+        var request = URLRequest(url: url, timeoutInterval: 10)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(ReviewEventBody(eventType: eventType, platform: platform, rating: rating))
+        return request
+    }
+
+    private func buildReviewFeedbackRequest(appId: String, body: String) throws -> URLRequest {
+        let base = configuration.baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let encodedAppId = appId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? appId
+        guard let url = URL(string: "\(base)/api/apps/\(encodedAppId)/review/feedback") else {
+            throw JishuError.invalidBaseURL
+        }
+        var request = URLRequest(url: url, timeoutInterval: 10)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let meta = deviceMetaInfo()
+        request.httpBody = try JSONEncoder().encode(ReviewFeedbackBody(
+            body: body,
+            platform: "ios",
+            osName: meta.osName,
+            osVersion: meta.osVersion,
+            deviceName: meta.deviceName
+        ))
+        return request
+    }
+
     // MARK: - Private
 
     private func perform(_ request: URLRequest, retriesLeft: Int) async throws -> AccessResult {
@@ -353,6 +434,20 @@ private struct ContactMessageBody: Encodable {
     let subject: String?
     let body: String
     let userId: String?
+    let platform: String
+    let osName: String
+    let osVersion: String
+    let deviceName: String
+}
+
+private struct ReviewEventBody: Encodable {
+    let eventType: String
+    let platform: String
+    let rating: Int?
+}
+
+private struct ReviewFeedbackBody: Encodable {
+    let body: String
     let platform: String
     let osName: String
     let osVersion: String

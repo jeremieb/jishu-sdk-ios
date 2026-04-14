@@ -1,15 +1,27 @@
 import Foundation
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// Jishu promo access SDK.
 ///
 /// Call `configure(baseURL:apiToken:appId:)` once at app startup before using any other API.
 public enum Jishu {
     /// The current SDK version.
-    public static let version = "0.1.4"
+    public static let version = "0.1.5"
 
     private nonisolated(unsafe) static var _configuration: JishuConfiguration?
     private nonisolated(unsafe) static var _client: JishuClient?
     private static let _cache = AccessCache()
+    private static let _reviewStore = ReviewStore()
+
+    /// Optional custom UI handler for the review prompt.
+    ///
+    /// Assign before calling ``trackLaunch(in:)``. When `nil`, the SDK presents a
+    /// `UIAlertController`-based star rating dialog.
+    /// - Note: Declared `nonisolated(unsafe)` to match `_configuration` and `_client`
+    ///   (Swift 6 strict concurrency — caller is responsible for setting this once at startup).
+    nonisolated(unsafe) public static weak var reviewUIHandler: (any JishuReviewUIHandler)?
 
     /// Configure the SDK. Must be called before `checkAccess` or reading `displayUserID` in production.
     ///
@@ -138,4 +150,80 @@ public enum Jishu {
         await _cache.set(key: cacheKey, result: result)
         return result
     }
+
+#if canImport(UIKit)
+    /// Track a cold app launch and, when `triggerMode` is `"auto"`, show the review prompt
+    /// if eligibility conditions are met.
+    ///
+    /// Call once per cold start — **not** from `applicationDidBecomeActive` or
+    /// `sceneDidBecomeActive`, which fire on every foreground transition.
+    /// Recommended placement: `application(_:didFinishLaunchingWithOptions:)` in `AppDelegate`,
+    /// or a `.task` modifier scoped to the root scene guarded against re-entry.
+    ///
+    /// - Parameter scene: The active `UIWindowScene`, used to present the prompt and to call
+    ///   `SKStoreReviewController.requestReview(in:)`. Pass `nil` to skip native review.
+    @MainActor
+    public static func trackLaunch(in scene: UIWindowScene? = nil) async {
+        guard let client = _client, let config = _configuration else { return }
+        await _reviewStore.setInstallDateIfNeeded()
+        await _reviewStore.incrementLaunchCount()
+
+        guard let reviewConfig = try? await client.fetchReviewConfig(appId: config.appId, store: _reviewStore),
+              reviewConfig.triggerMode == "auto" else { return }
+
+        guard await JishuReview.isEligible(config: reviewConfig, store: _reviewStore) else { return }
+
+        await JishuReview.runPromptFlow(
+            config: reviewConfig,
+            store: _reviewStore,
+            client: client,
+            appId: config.appId,
+            uiHandler: reviewUIHandler,
+            scene: scene
+        )
+    }
+
+    /// Manually trigger the review flow at a meaningful moment in your app.
+    ///
+    /// Always records the launch (increments launch count and sets install date on first call).
+    /// The SDK still respects `cooldownDays` and `maxPromptsPerDevice`.
+    /// Use this when `triggerMode` is `"manual"`.
+    ///
+    /// - Parameter scene: The active `UIWindowScene`.
+    /// - Returns: `true` if the prompt was shown.
+    @MainActor
+    @discardableResult
+    public static func requestReviewIfEligible(in scene: UIWindowScene? = nil) async -> Bool {
+        guard let client = _client, let config = _configuration else { return false }
+        // Always record the launch — even in manual mode
+        await _reviewStore.setInstallDateIfNeeded()
+        await _reviewStore.incrementLaunchCount()
+
+        guard let reviewConfig = try? await client.fetchReviewConfig(appId: config.appId, store: _reviewStore) else {
+            return false
+        }
+        // In manual mode skip launch/day conditions — developer chose the moment
+        guard reviewConfig.enabled else { return false }
+        let promptCount = await _reviewStore.promptCount
+        guard promptCount < reviewConfig.maxPromptsPerDevice else { return false }
+        if let lastInterval = await _reviewStore.lastPromptDate {
+            let daysSince = Calendar.current.dateComponents(
+                [.day],
+                from: Date(timeIntervalSince1970: lastInterval),
+                to: Date()
+            ).day ?? 0
+            guard daysSince >= reviewConfig.cooldownDays else { return false }
+        }
+
+        await JishuReview.runPromptFlow(
+            config: reviewConfig,
+            store: _reviewStore,
+            client: client,
+            appId: config.appId,
+            uiHandler: reviewUIHandler,
+            scene: scene
+        )
+        return true
+    }
+#endif
 }
