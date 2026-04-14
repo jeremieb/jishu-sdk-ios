@@ -44,7 +44,7 @@ final class DefaultReviewAlertPresenter {
         let title    = config.promptTitle.isEmpty    ? "Enjoying the app?"              : config.promptTitle
         let question = config.promptQuestion.isEmpty ? "We'd love to hear what you think." : config.promptQuestion
 
-        // Star rating alert
+        // Star rating alert — walk to the topmost presented controller to avoid silent presentation failures
         let rating: Int? = await withCheckedContinuation { continuation in
             let alert = UIAlertController(title: title, message: question, preferredStyle: .alert)
             for star in 1...5 {
@@ -56,7 +56,9 @@ final class DefaultReviewAlertPresenter {
             alert.addAction(UIAlertAction(title: "Not now", style: .cancel) { _ in
                 continuation.resume(returning: nil)
             })
-            rootVC.present(alert, animated: true)
+            var presenter: UIViewController = rootVC
+            while let presented = presenter.presentedViewController { presenter = presented }
+            presenter.present(alert, animated: true)
         }
 
         guard let rating else {

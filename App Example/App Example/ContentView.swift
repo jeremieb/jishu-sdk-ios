@@ -38,6 +38,20 @@ struct ContentView: View {
             .buttonStyle(.borderedProminent)
             .disabled(viewModel.isCheckingGrant)
 
+            Button {
+                viewModel.requestReviewIfEligible()
+            } label: {
+                if viewModel.isRequestingReview {
+                    ProgressView()
+                        .frame(maxWidth: .infinity)
+                } else {
+                    Text("Ask for Review")
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .buttonStyle(.bordered)
+            .disabled(viewModel.isRequestingReview)
+
             GroupBox(label: Label("Result", systemImage: "checkmark.shield")) {
                 Text(viewModel.isGranted ? "Access premium granted" : "Access premium refused")
                     .foregroundStyle(viewModel.isGranted ? Color.green : Color.red)
@@ -47,6 +61,13 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
                     .padding(.top, 4)
+            }
+
+            GroupBox(label: Label("Review Prompt", systemImage: "star.bubble")) {
+                Text(viewModel.reviewRequestMessage)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
             }
         }
         .padding()

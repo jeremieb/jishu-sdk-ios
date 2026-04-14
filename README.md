@@ -2,7 +2,7 @@
 
 ![github package](https://github.com/user-attachments/assets/161cb128-4312-4dd2-b69c-a47698ee8096)
 
-A lightweight Swift package for [Jishu](https://jishu.page) — check promo access grants, send contact form messages, and collect feature proposals from iOS apps.
+A lightweight Swift package for [Jishu](https://jishu.page) — check promo access grants, send contact form messages, collect feature proposals, and prompt users for App Store reviews from iOS apps.
 
 - **Current version:** `0.1.5`
 - **Minimum platform:** iOS 15
@@ -76,7 +76,6 @@ import Jishu
 func application(_ application: UIApplication,
                  didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
     Jishu.configure(
-        baseURL: URL(string: "https://jishu.page")!,
         apiToken: "YOUR_API_TOKEN",
         appId: "YOUR_APP_ID"
     )
@@ -88,7 +87,6 @@ func application(_ application: UIApplication,
 struct MyApp: App {
     init() {
         Jishu.configure(
-            baseURL: URL(string: "https://jishu.page")!,
             apiToken: "YOUR_API_TOKEN",
             appId: "YOUR_APP_ID"
         )
@@ -96,6 +94,8 @@ struct MyApp: App {
     var body: some Scene { WindowGroup { ContentView() } }
 }
 ```
+
+The `server` parameter defaults to `.production` (`https://jishu.page`). See [Staging smoke test](#staging-smoke-test) for how to point at the staging environment.
 
 ### 2. Check access
 
@@ -361,6 +361,8 @@ public static func vote(on proposal: JishuProposal) async throws -> Int
 | `JishuError.httpError(429)` | Rate limit — too many proposals or votes from the same IP/device window |
 | `JishuError.httpError(500)` | Server error after one retry |
 
+---
+
 ## Review prompts
 
 The review prompt feature intercepts users before they reach the App Store, lets you measure sentiment, routes happy users to the native StoreKit review dialog, and captures negative feedback as a message in your dashboard **User Messages** inbox — labelled **Review Feedback** so you can distinguish it from contact form mail.
@@ -386,28 +388,29 @@ Go to your app in the Jishu dashboard → **Reviews** tab. Configure:
 
 Call once per cold app launch. The SDK increments the launch counter, fetches the remote config (cached for 1 hour), and shows the prompt when all eligibility conditions are met.
 
-Place it in `sceneDidBecomeActive` or your SwiftUI `.task` — **not** in every `onAppear`, which fires on every navigation push:
+Place it in your SwiftUI `.task` or `AppDelegate` — **not** in `sceneDidBecomeActive` or `onAppear`, which fire on every foreground transition:
 
 ```swift
-// SceneDelegate
-func sceneDidBecomeActive(_ scene: UIScene) {
-    guard let windowScene = scene as? UIWindowScene else { return }
-    Task { await Jishu.trackLaunch(in: windowScene) }
-}
-
 // SwiftUI @main
 @main
 struct MyApp: App {
+    @State private var didTrackLaunch = false
+
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .task { await Jishu.trackLaunch(in: nil) }
+                .task {
+                    guard !didTrackLaunch else { return }
+                    didTrackLaunch = true
+                    let scene = UIApplication.shared.connectedScenes
+                        .compactMap { $0 as? UIWindowScene }
+                        .first(where: { $0.activationState == .foregroundActive })
+                    await Jishu.trackLaunch(in: scene)
+                }
         }
     }
 }
 ```
-
-> **Important:** Cold start means `applicationDidFinishLaunching` / `init()` of your `@main` struct. If you use `sceneDidBecomeActive`, it fires on every foreground transition — keep a `didTrackLaunch` flag or call it only from your root view's `.task` (which runs once per view lifetime).
 
 ### Manual mode — `requestReviewIfEligible`
 
@@ -422,6 +425,8 @@ if shown {
 ```
 
 The method always records the launch (sets install date on first call and increments launch count), so you do not need a separate `trackLaunch` call in manual mode.
+
+> **Note:** Unlike `trackLaunch`, manual triggers always fetch the review config fresh from the server rather than using the local cache. This means dashboard changes (enabling the review, updating the prompt text) take effect immediately the next time the button is tapped, without waiting for the 1-hour cache to expire.
 
 ### Custom UI
 
@@ -446,8 +451,8 @@ Your implementation receives the `promptTitle` and `promptQuestion` strings from
 
 ```swift
 public struct JishuReviewResponse: Sendable {
-    public let rating: Int?           // 1–5, nil if dismissed without rating
-    public let dismissed: Bool        // true if the user closed without rating
+    public let rating: Int?             // 1–5, nil if dismissed without rating
+    public let dismissed: Bool          // true if the user closed without rating
     public let feedbackMessage: String? // negative-path free text; nil if not captured
 }
 ```
@@ -472,9 +477,10 @@ public static weak var reviewUIHandler: (any JishuReviewUIHandler)?
 ### Notes
 
 - `trackLaunch` and `requestReviewIfEligible` are no-ops if `Jishu.configure(...)` has not been called.
-- Network errors fetching the review config are swallowed silently — no prompt is shown if the config cannot be fetched.
-- The `UIWindowScene` parameter is optional. Pass `nil` and the SDK will use `UIApplication.shared.connectedScenes` to find an active scene.
+- If the review config cannot be fetched from the network during a **manual** trigger, the SDK falls back to a default config (enabled, generic text) so the prompt still appears. The auto `trackLaunch` path does not show a prompt when the config is unavailable.
+- Pass a non-nil `UIWindowScene` for the prompt to appear. Passing `nil` skips the UI presentation silently.
 - Review feedback messages appear in **User Messages** with the label **Review Feedback** and no email address. The Reply button is hidden for these entries.
+- When running in `.verbose` mode, the console will log the reason a prompt was skipped (e.g. `💬 [Jishu] Review prompt skipped — cooldown active (0/90 days elapsed)`).
 
 ---
 
@@ -511,43 +517,64 @@ try await Jishu.sendContactMessage(ContactMessage(
 
 ## Debug logging
 
-Pass `debugLevel` to `configure()` to control what the SDK prints to the console. When omitted, the default level is used.
+Pass `debugLevel` to `configure()` to control what the SDK prints to the console.
 
-| Level | Behavior |
-|-------|----------|
-| `.default` | Prints errors only (HTTP failures, transport errors, failed retries). Each line is prefixed with `‼️ Jishu -`. |
-| `.verbose` | Prints all SDK activity — outgoing requests, HTTP status codes, retries, and errors. Each line is prefixed with `📱 Jishu -`. |
+| Level | What is printed |
+|-------|-----------------|
+| `.default` | Errors (`❌`) and retry attempts (`🔄`) only. |
+| `.verbose` | Everything: SDK configuration, every outgoing request, response status, formatted response body, retries, and errors. |
 
 ```swift
-// Errors only (default — same as omitting the parameter)
+// Errors and retries only (default — same as omitting the parameter)
 Jishu.configure(
-    baseURL: URL(string: "https://jishu.page")!,
     apiToken: "YOUR_API_TOKEN",
-    appId: "YOUR_APP_ID",
-    debugLevel: .default
+    appId: "YOUR_APP_ID"
 )
 
 // Full request/response trace
 Jishu.configure(
-    baseURL: URL(string: "https://jishu.page")!,
     apiToken: "YOUR_API_TOKEN",
     appId: "YOUR_APP_ID",
     debugLevel: .verbose
 )
 ```
 
-Example `.verbose` output:
+### Verbose output format
+
+Each log line is prefixed with a distinct emoji so you can scan the console at a glance:
+
+| Prefix | Meaning |
+|--------|---------|
+| `⚙️ [Jishu]` | SDK configured — printed once at startup |
+| `🚀 [Jishu]` | Outgoing request (`METHOD url`) |
+| `✅ [Jishu]` | Successful response (2xx) |
+| `⚠️ [Jishu]` | Non-2xx response (4xx/5xx status line) |
+| `📦 [Jishu]` | Response body — pretty-printed JSON |
+| `🔄 [Jishu]` | Retry attempt (also printed in `.default` mode) |
+| `❌ [Jishu]` | Error — HTTP failure or transport error (also printed in `.default` mode) |
+| `💬 [Jishu]` | Informational — e.g. why a review prompt was skipped, config fetch fallback |
+
+Example `.verbose` output for a successful access check:
 
 ```
-📱 Jishu - Sending POST https://jishu.page/api/v1/mobile/entitlements/check
-📱 Jishu - HTTP 200
+⚙️ [Jishu] Configured — server: production | appId: abc123 | debugLevel: verbose
+🚀 [Jishu] POST https://jishu.page/api/v1/mobile/entitlements/check
+✅ [Jishu] 200 POST https://jishu.page/api/v1/mobile/entitlements/check
+📦 [Jishu]
+{
+  "granted" : true,
+  "grantId" : "grant_abc",
+  "matchType" : "user",
+  "expiresAt" : "2026-07-01T00:00:00.000Z",
+  "serverTime" : "2026-04-14T12:00:00.000Z"
+}
 ```
 
-Example `.default` output (error scenario):
+Example `.default` output (server error with retry):
 
 ```
-‼️ Jishu - Server error 503, retrying...
-‼️ Jishu - Server error 503 — no retries left
+🔄 [Jishu] Server error 503, retrying https://jishu.page/api/v1/mobile/entitlements/check
+❌ [Jishu] Server error 503 — no retries left
 ```
 
 > **Tip:** Use `.verbose` during development and staging smoke tests. Switch to `.default` (or omit the parameter) in production to keep your logs quiet unless something goes wrong.
@@ -566,15 +593,22 @@ Use this flow to verify the SDK works end-to-end against the live staging enviro
 
 ### Configure for staging
 
+Pass `server: .staging` to point the SDK at `https://staging.jishu.page`:
+
 ```swift
 Jishu.configure(
-    baseURL: URL(string: "https://staging.jishu.page")!,
+    server: .staging,
     apiToken: "YOUR_STAGING_API_TOKEN",
     appId: "YOUR_STAGING_APP_ID",
     environment: "staging",
-    debugLevel: .verbose          // prints request/response info to console
+    debugLevel: .verbose
 )
 ```
+
+| `server` value | Backend URL |
+|---|---|
+| `.production` *(default)* | `https://jishu.page` |
+| `.staging` | `https://staging.jishu.page` |
 
 ### Call `checkAccess`
 
@@ -653,8 +687,8 @@ The package is versioned via **git tags**. Swift Package Manager requires a full
 ### Tag and push
 
 ```bash
-git tag 0.1.4
-git push origin 0.1.4
+git tag 0.2.0
+git push origin 0.2.0
 ```
 
 Or push all local tags at once:
@@ -683,7 +717,6 @@ Downstream consumers using `.upToNextMajor(from:)` will pick up the new version 
 ### Unit tests (no network required)
 
 ```bash
-cd Jishu
 swift test
 ```
 
@@ -694,7 +727,7 @@ All tests should pass. The test suite covers:
 | `DeviceIDStore` | UUID generation, persistence, isolation between suites |
 | `AccessResult decoding` | Full response, `matchType: none`, null fields, ISO 8601 dates |
 | `AccessCache` | Cache hit/miss, negative result exclusion, expiry, 30-minute cap |
-| `JishuClient` | 200 success, 401 no-retry, 500 retry, retry-then-succeed, auth header |
+| `JishuClient` | 200 success, 401 no-retry, 500 retry, retry-then-succeed, auth header, proposal/vote body encoding |
 | `Contact` | 201/200 success, 429 error, 500 retry, correct URL and no auth header, body encoding |
 
 ### Testing in your Xcode project (local package)
@@ -709,4 +742,4 @@ To switch back to the published version later, remove the local package and re-a
 
 ### Integration test against staging
 
-Follow the [Staging smoke test](#staging-smoke-test) section above. Configure the SDK with `debugLevel: .verbose` to see the full request/response cycle in the Xcode console.
+Follow the [Staging smoke test](#staging-smoke-test) section above. Configure the SDK with `debugLevel: .verbose` to see the full request/response cycle — including the pretty-printed JSON body for every API call — in the Xcode console.

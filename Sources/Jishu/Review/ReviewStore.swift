@@ -61,4 +61,9 @@ actor ReviewStore {
         defaults.set(data, forKey: Key.configCache)
         defaults.set(Date().timeIntervalSince1970, forKey: Key.configCachedAt)
     }
+
+    func invalidateConfigCache() {
+        defaults.removeObject(forKey: Key.configCache)
+        defaults.removeObject(forKey: Key.configCachedAt)
+    }
 }
