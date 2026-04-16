@@ -109,4 +109,7 @@ struct SingleProposalResponse: Decodable {
 
 struct VoteCountResponse: Decodable {
     let voteCount: Int
+    enum CodingKeys: String, CodingKey {
+        case voteCount = "vote_count"
+    }
 }
