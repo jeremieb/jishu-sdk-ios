@@ -32,13 +32,13 @@ import UIKit
 
 @MainActor
 final class DefaultReviewAlertPresenter {
-    func present(config: ReviewConfig, in windowScene: UIWindowScene?) async -> JishuReviewResponse {
+    func present(config: ReviewConfig, in windowScene: UIWindowScene?) async -> JishuReviewResponse? {
         guard
             let windowScene,
             let rootVC = windowScene.windows.first(where: { $0.isKeyWindow })?.rootViewController
                 ?? windowScene.windows.first?.rootViewController
         else {
-            return JishuReviewResponse(rating: nil, dismissed: true)
+            return nil
         }
 
         let title    = config.promptTitle.isEmpty    ? "Enjoying the app?"              : config.promptTitle

@@ -477,7 +477,7 @@ public static weak var reviewUIHandler: (any JishuReviewUIHandler)?
 ### Notes
 
 - `trackLaunch` and `requestReviewIfEligible` are no-ops if `Jishu.configure(...)` has not been called.
-- If the review config cannot be fetched from the network during a **manual** trigger, the SDK falls back to a default config (enabled, generic text) so the prompt still appears. The auto `trackLaunch` path does not show a prompt when the config is unavailable.
+- If the review config cannot be fetched from the network during a **manual** trigger, the SDK skips the prompt so the live dashboard settings remain authoritative. The auto `trackLaunch` path also does not show a prompt when the config is unavailable.
 - Pass a non-nil `UIWindowScene` for the prompt to appear. Passing `nil` skips the UI presentation silently.
 - Review feedback messages appear in **User Messages** with the label **Review Feedback** and no email address. The Reply button is hidden for these entries.
 - When running in `.verbose` mode, the console will log the reason a prompt was skipped (e.g. `💬 [Jishu] Review prompt skipped — cooldown active (0/90 days elapsed)`).

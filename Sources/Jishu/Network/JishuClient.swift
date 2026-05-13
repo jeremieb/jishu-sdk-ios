@@ -53,14 +53,14 @@ struct JishuClient: Sendable {
 
     /// Fetch review config, using a 1-hour in-process TTL backed by ReviewStore.
     func fetchReviewConfig(appId: String, store: ReviewStore) async throws -> ReviewConfig {
-        if let cached = await store.cachedConfig() {
+        if let cached = await store.cachedConfig(appId: appId) {
             return cached
         }
         let request = try buildReviewConfigRequest(appId: appId)
         let config = try await performDecoding(request, retriesLeft: 1) { data in
             try Self.plainDecoder.decode(ReviewConfig.self, from: data)
         }
-        await store.cacheConfig(config)
+        await store.cacheConfig(config, appId: appId)
         return config
     }
 

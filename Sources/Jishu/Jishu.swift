@@ -165,15 +165,15 @@ public enum Jishu {
     @MainActor
     public static func trackLaunch(in scene: UIWindowScene? = nil) async {
         guard let client = _client, let config = _configuration else { return }
-        await _reviewStore.setInstallDateIfNeeded()
-        await _reviewStore.incrementLaunchCount()
+        await _reviewStore.setInstallDateIfNeeded(appId: config.appId)
+        await _reviewStore.incrementLaunchCount(appId: config.appId)
 
         guard let reviewConfig = try? await client.fetchReviewConfig(appId: config.appId, store: _reviewStore),
               reviewConfig.triggerMode == "auto" else { return }
 
-        guard await JishuReview.isEligible(config: reviewConfig, store: _reviewStore) else { return }
+        guard await JishuReview.isEligible(config: reviewConfig, store: _reviewStore, appId: config.appId) else { return }
 
-        await JishuReview.runPromptFlow(
+        _ = await JishuReview.runPromptFlow(
             config: reviewConfig,
             store: _reviewStore,
             client: client,
@@ -201,20 +201,19 @@ public enum Jishu {
         let log = JishuLogger(level: config.debugLevel)
 
         // Always record the launch — even in manual mode
-        await _reviewStore.setInstallDateIfNeeded()
-        await _reviewStore.incrementLaunchCount()
+        await _reviewStore.setInstallDateIfNeeded(appId: config.appId)
+        await _reviewStore.incrementLaunchCount(appId: config.appId)
 
         // Bypass the cache for manual triggers — the developer is explicitly requesting the prompt,
         // so always fetch fresh config to pick up any dashboard changes made since last launch.
-        await _reviewStore.invalidateConfigCache()
+        await _reviewStore.invalidateConfigCache(appId: config.appId)
 
-        // Fetch config; fall back to defaults so a network hiccup never silently blocks a manual trigger
         let reviewConfig: ReviewConfig
         do {
             reviewConfig = try await client.fetchReviewConfig(appId: config.appId, store: _reviewStore)
         } catch {
-            log.info("Could not fetch review config (\(error.localizedDescription)) — using defaults")
-            reviewConfig = .manualFallback
+            log.info("Could not fetch review config (\(error.localizedDescription)) — skipping prompt")
+            return false
         }
 
         // In manual mode skip launch/day conditions — developer chose the moment
@@ -222,12 +221,12 @@ public enum Jishu {
             log.info("Review prompt is disabled in dashboard config")
             return false
         }
-        let promptCount = await _reviewStore.promptCount
+        let promptCount = await _reviewStore.promptCount(appId: config.appId)
         guard promptCount < reviewConfig.maxPromptsPerDevice else {
             log.info("Review prompt skipped — maxPromptsPerDevice (\(reviewConfig.maxPromptsPerDevice)) reached")
             return false
         }
-        if let lastInterval = await _reviewStore.lastPromptDate {
+        if let lastInterval = await _reviewStore.lastPromptDate(appId: config.appId) {
             let daysSince = Calendar.current.dateComponents(
                 [.day],
                 from: Date(timeIntervalSince1970: lastInterval),
@@ -239,7 +238,7 @@ public enum Jishu {
             }
         }
 
-        await JishuReview.runPromptFlow(
+        return await JishuReview.runPromptFlow(
             config: reviewConfig,
             store: _reviewStore,
             client: client,
@@ -247,7 +246,6 @@ public enum Jishu {
             uiHandler: reviewUIHandler,
             scene: scene
         )
-        return true
     }
 #endif
 }
