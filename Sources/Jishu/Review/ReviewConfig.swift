@@ -17,21 +17,3 @@ public struct ReviewConfig: Codable, Sendable {
     public let feedbackPrompt: String
     public let captureFeedbackOnNegative: Bool
 }
-
-extension ReviewConfig {
-    /// Used as a fallback when the server config cannot be fetched during a manual trigger.
-    static let manualFallback = ReviewConfig(
-        enabled: true,
-        triggerMode: "manual",
-        minLaunches: 0,
-        minDaysSinceInstall: 0,
-        triggerLogic: "OR",
-        cooldownDays: 0,
-        maxPromptsPerDevice: Int.max,
-        promptTitle: "Enjoying the app?",
-        promptQuestion: "We'd love to hear what you think.",
-        ratingThreshold: 4,
-        feedbackPrompt: "What could we improve?",
-        captureFeedbackOnNegative: true
-    )
-}

@@ -6,13 +6,13 @@ import StoreKit
 
 struct JishuReview {
     /// Pure eligibility check — no side effects, no network calls.
-    static func isEligible(config: ReviewConfig, store: ReviewStore) async -> Bool {
+    static func isEligible(config: ReviewConfig, store: ReviewStore, appId: String) async -> Bool {
         guard config.enabled else { return false }
 
-        let promptCount = await store.promptCount
+        let promptCount = await store.promptCount(appId: appId)
         guard promptCount < config.maxPromptsPerDevice else { return false }
 
-        if let lastInterval = await store.lastPromptDate {
+        if let lastInterval = await store.lastPromptDate(appId: appId) {
             let daysSince = Calendar.current.dateComponents(
                 [.day],
                 from: Date(timeIntervalSince1970: lastInterval),
@@ -21,8 +21,8 @@ struct JishuReview {
             guard daysSince >= config.cooldownDays else { return false }
         }
 
-        let launchCount  = await store.launchCount
-        let installDate  = await store.installDate
+        let launchCount  = await store.launchCount(appId: appId)
+        let installDate  = await store.installDate(appId: appId)
         let launchesMet  = config.minLaunches == 0 || launchCount >= config.minLaunches
         let daysMet: Bool = {
             guard config.minDaysSinceInstall > 0 else { return true }
@@ -47,11 +47,8 @@ struct JishuReview {
         appId: String,
         uiHandler: (any JishuReviewUIHandler)?,
         scene: UIWindowScene?
-    ) async {
-        // 1. Log shown
-        await client.logReviewEvent(appId: appId, eventType: "shown", platform: "ios", rating: nil)
-
-        // 2. Present UI
+    ) async -> Bool {
+        // 1. Present UI
         let response: JishuReviewResponse
         if let handler = uiHandler {
             response = await handler.presentReviewPrompt(
@@ -59,13 +56,20 @@ struct JishuReview {
                 question: config.promptQuestion.isEmpty ? "We'd love to hear what you think." : config.promptQuestion
             )
         } else {
-            response = await DefaultReviewAlertPresenter().present(config: config, in: scene)
+            guard let presented = await DefaultReviewAlertPresenter().present(config: config, in: scene) else {
+                return false
+            }
+            response = presented
         }
+
+        // 2. Log shown only after the prompt was actually presented.
+        await client.logReviewEvent(appId: appId, eventType: "shown", platform: "ios", rating: nil)
 
         // 3. Dismissed without rating
         if response.dismissed || response.rating == nil {
             await client.logReviewEvent(appId: appId, eventType: "dismissed", platform: "ios", rating: nil)
-            return
+            await store.recordPromptShown(appId: appId)
+            return true
         }
 
         let rating = response.rating!
@@ -77,8 +81,8 @@ struct JishuReview {
         if rating >= config.ratingThreshold {
             if let scene {
                 SKStoreReviewController.requestReview(in: scene)
+                await client.logReviewEvent(appId: appId, eventType: "native_requested", platform: "ios", rating: nil)
             }
-            await client.logReviewEvent(appId: appId, eventType: "native_requested", platform: "ios", rating: nil)
         }
 
         // 6. Negative path — capture feedback
@@ -91,7 +95,8 @@ struct JishuReview {
         }
 
         // 7. Update local state
-        await store.recordPromptShown()
+        await store.recordPromptShown(appId: appId)
+        return true
     }
 }
 #endif

@@ -57,6 +57,23 @@ private let successJSON = """
 }
 """.data(using: .utf8)!
 
+private let reviewConfigJSON = """
+{
+  "enabled": true,
+  "triggerMode": "manual",
+  "minLaunches": 1,
+  "minDaysSinceInstall": 0,
+  "triggerLogic": "AND",
+  "cooldownDays": 7,
+  "maxPromptsPerDevice": 2,
+  "promptTitle": "Enjoying the app?",
+  "promptQuestion": "Tell us what you think.",
+  "ratingThreshold": 4,
+  "feedbackPrompt": "What could we improve?",
+  "captureFeedbackOnNegative": true
+}
+""".data(using: .utf8)!
+
 private func makeHTTPResponse(status: Int) -> HTTPURLResponse {
     HTTPURLResponse(
         url: URL(string: "https://staging.jishu.page")!,
@@ -237,7 +254,7 @@ struct JishuClientTests {
         var capturedRequest: URLRequest?
         let responseJSON = """
         {
-          "voteCount": 7
+          "vote_count": 7
         }
         """.data(using: .utf8)!
         MockURLProtocol.requestHandler = { request in
@@ -269,6 +286,44 @@ struct JishuClientTests {
         #expect(decoded.osName.isEmpty == false)
         #expect(decoded.osVersion.isEmpty == false)
         #expect(decoded.deviceName.isEmpty == false)
+    }
+
+    @Test("fetchReviewConfig uses cached value for the same app")
+    func fetchReviewConfigUsesCachedValueForSameApp() async throws {
+        var callCount = 0
+        MockURLProtocol.requestHandler = { _ in
+            callCount += 1
+            return (makeHTTPResponse(status: 200), reviewConfigJSON)
+        }
+        let client = makeClient()
+        let suiteName = "JishuClientTests.fetchReviewConfigUsesCachedValueForSameApp"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let store = ReviewStore(defaults: defaults)
+
+        _ = try await client.fetchReviewConfig(appId: "app_one", store: store)
+        _ = try await client.fetchReviewConfig(appId: "app_one", store: store)
+
+        #expect(callCount == 1)
+    }
+
+    @Test("fetchReviewConfig cache is isolated per app id")
+    func fetchReviewConfigCacheIsIsolatedPerAppId() async throws {
+        var requestedPaths: [String] = []
+        MockURLProtocol.requestHandler = { request in
+            requestedPaths.append(request.url?.path ?? "")
+            return (makeHTTPResponse(status: 200), reviewConfigJSON)
+        }
+        let client = makeClient()
+        let suiteName = "JishuClientTests.fetchReviewConfigCacheIsIsolatedPerAppId"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let store = ReviewStore(defaults: defaults)
+
+        _ = try await client.fetchReviewConfig(appId: "app_one", store: store)
+        _ = try await client.fetchReviewConfig(appId: "app_two", store: store)
+
+        #expect(requestedPaths == ["/api/apps/app_one/review/config", "/api/apps/app_two/review/config"])
     }
 
 }

@@ -16,54 +16,60 @@ actor ReviewStore {
         self.defaults = defaults
     }
 
-    var installDate: Double {
-        defaults.double(forKey: Key.installDate)
+    private func namespacedKey(_ base: String, appId: String) -> String {
+        "\(base).\(appId)"
     }
 
-    var launchCount: Int {
-        defaults.integer(forKey: Key.launchCount)
+    func installDate(appId: String) -> Double {
+        defaults.double(forKey: namespacedKey(Key.installDate, appId: appId))
     }
 
-    var lastPromptDate: Double? {
-        let v = defaults.double(forKey: Key.lastPromptDate)
+    func launchCount(appId: String) -> Int {
+        defaults.integer(forKey: namespacedKey(Key.launchCount, appId: appId))
+    }
+
+    func lastPromptDate(appId: String) -> Double? {
+        let v = defaults.double(forKey: namespacedKey(Key.lastPromptDate, appId: appId))
         return v > 0 ? v : nil
     }
 
-    var promptCount: Int {
-        defaults.integer(forKey: Key.promptCount)
+    func promptCount(appId: String) -> Int {
+        defaults.integer(forKey: namespacedKey(Key.promptCount, appId: appId))
     }
 
-    func setInstallDateIfNeeded() {
-        guard defaults.double(forKey: Key.installDate) == 0 else { return }
-        defaults.set(Date().timeIntervalSince1970, forKey: Key.installDate)
+    func setInstallDateIfNeeded(appId: String) {
+        let key = namespacedKey(Key.installDate, appId: appId)
+        guard defaults.double(forKey: key) == 0 else { return }
+        defaults.set(Date().timeIntervalSince1970, forKey: key)
     }
 
-    func incrementLaunchCount() {
-        defaults.set(launchCount + 1, forKey: Key.launchCount)
+    func incrementLaunchCount(appId: String) {
+        let key = namespacedKey(Key.launchCount, appId: appId)
+        defaults.set(launchCount(appId: appId) + 1, forKey: key)
     }
 
-    func recordPromptShown() {
-        defaults.set(Date().timeIntervalSince1970, forKey: Key.lastPromptDate)
-        defaults.set(promptCount + 1, forKey: Key.promptCount)
+    func recordPromptShown(appId: String) {
+        defaults.set(Date().timeIntervalSince1970, forKey: namespacedKey(Key.lastPromptDate, appId: appId))
+        defaults.set(promptCount(appId: appId) + 1, forKey: namespacedKey(Key.promptCount, appId: appId))
     }
 
     /// Returns cached config if it is within the 1-hour TTL.
-    func cachedConfig() -> ReviewConfig? {
-        let cachedAt = defaults.double(forKey: Key.configCachedAt)
+    func cachedConfig(appId: String) -> ReviewConfig? {
+        let cachedAt = defaults.double(forKey: namespacedKey(Key.configCachedAt, appId: appId))
         guard cachedAt > 0 else { return nil }
         guard Date().timeIntervalSince1970 - cachedAt < 3600 else { return nil }
-        guard let data = defaults.data(forKey: Key.configCache) else { return nil }
+        guard let data = defaults.data(forKey: namespacedKey(Key.configCache, appId: appId)) else { return nil }
         return try? JSONDecoder().decode(ReviewConfig.self, from: data)
     }
 
-    func cacheConfig(_ config: ReviewConfig) {
+    func cacheConfig(_ config: ReviewConfig, appId: String) {
         guard let data = try? JSONEncoder().encode(config) else { return }
-        defaults.set(data, forKey: Key.configCache)
-        defaults.set(Date().timeIntervalSince1970, forKey: Key.configCachedAt)
+        defaults.set(data, forKey: namespacedKey(Key.configCache, appId: appId))
+        defaults.set(Date().timeIntervalSince1970, forKey: namespacedKey(Key.configCachedAt, appId: appId))
     }
 
-    func invalidateConfigCache() {
-        defaults.removeObject(forKey: Key.configCache)
-        defaults.removeObject(forKey: Key.configCachedAt)
+    func invalidateConfigCache(appId: String) {
+        defaults.removeObject(forKey: namespacedKey(Key.configCache, appId: appId))
+        defaults.removeObject(forKey: namespacedKey(Key.configCachedAt, appId: appId))
     }
 }
