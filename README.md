@@ -4,7 +4,6 @@
 
 A lightweight Swift package for [Jishu](https://jishu.page) — check promo access grants, send contact form messages, collect feature proposals, and prompt users for App Store reviews from iOS apps.
 
-- **Current version:** `0.1.5`
 - **Minimum platform:** iOS 15
 - **Swift:** 6.0+
 
