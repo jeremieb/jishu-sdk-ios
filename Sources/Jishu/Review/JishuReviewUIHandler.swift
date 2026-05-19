@@ -7,6 +7,16 @@ public protocol JishuReviewUIHandler: AnyObject {
     /// Present a 1–5 star rating UI and return the user's response.
     @MainActor
     func presentReviewPrompt(title: String, question: String) async -> JishuReviewResponse
+
+    /// Called after a below-threshold rating when `captureFeedbackOnNegative` is enabled.
+    /// Present a text input with `prompt` as the title and return what the user typed, or `nil` to skip.
+    /// The default implementation returns `nil` — custom handlers that don't need feedback capture can ignore it.
+    @MainActor
+    func presentFeedbackPrompt(prompt: String) async -> String?
+}
+
+public extension JishuReviewUIHandler {
+    func presentFeedbackPrompt(prompt: String) async -> String? { nil }
 }
 
 /// The user's response to a review prompt.

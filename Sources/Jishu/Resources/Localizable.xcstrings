@@ -50,6 +50,36 @@
           }
         }
       }
+    },
+    "jishu.review.feedback.placeholder" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your feedback"
+          }
+        }
+      }
+    },
+    "jishu.review.feedback.send" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Send"
+          }
+        }
+      }
+    },
+    "jishu.review.feedback.skip" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skip"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

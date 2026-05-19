@@ -4,6 +4,8 @@ public struct JishuReviewView: View {
 
     var presenter: JishuReviewPresenter
 
+    @State private var feedbackText = ""
+
     private let options: [(symbol: String, label: LocalizedStringKey)] = [
         ("1.circle.fill", "jishu.review.rating.terrible"),
         ("2.circle.fill", "jishu.review.rating.bad"),
@@ -17,6 +19,19 @@ public struct JishuReviewView: View {
     }
 
     public var body: some View {
+        #if !os(watchOS)
+        if presenter.showFeedbackStep {
+            feedbackStepView
+        } else {
+            ratingStepView
+        }
+        #else
+        ratingStepView
+        #endif
+    }
+
+    @ViewBuilder
+    private var ratingStepView: some View {
         VStack(spacing: 20) {
             Text(presenter.promptTitle)
                 .font(.title2.bold())
@@ -59,4 +74,41 @@ public struct JishuReviewView: View {
         .presentationDragIndicator(.visible)
         #endif
     }
+
+    #if !os(watchOS)
+    @ViewBuilder
+    private var feedbackStepView: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(presenter.feedbackPromptText)
+                .font(.title3.bold())
+
+            TextField(text: $feedbackText, axis: .vertical) {
+                Text("jishu.review.feedback.placeholder", bundle: .module)
+            }
+            .textFieldStyle(.roundedBorder)
+            .lineLimit(3, reservesSpace: true)
+
+            HStack {
+                Button {
+                    presenter.skipFeedback()
+                } label: {
+                    Text("jishu.review.feedback.skip", bundle: .module)
+                }
+                .buttonStyle(.bordered)
+
+                Spacer()
+
+                Button {
+                    presenter.submitFeedback(text: feedbackText)
+                } label: {
+                    Text("jishu.review.feedback.send", bundle: .module)
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(24)
+        .presentationDetents([.height(260)])
+        .presentationDragIndicator(.visible)
+    }
+    #endif
 }

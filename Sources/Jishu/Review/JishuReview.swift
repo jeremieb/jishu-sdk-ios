@@ -181,9 +181,15 @@ struct JishuReview {
         }
 
         if rating < config.ratingThreshold && config.captureFeedbackOnNegative {
-            let feedback = response.feedbackMessage ?? ""
-            if !feedback.isEmpty {
-                await client.sendReviewFeedback(appId: appId, body: feedback)
+            let prompt = config.feedbackPrompt.isEmpty ? "What could we improve?" : config.feedbackPrompt
+            let feedbackText: String?
+            if let handler = uiHandler {
+                feedbackText = await handler.presentFeedbackPrompt(prompt: prompt)
+            } else {
+                feedbackText = response.feedbackMessage
+            }
+            if let text = feedbackText, !text.isEmpty {
+                await client.sendReviewFeedback(appId: appId, body: text)
             }
         }
 
@@ -221,9 +227,10 @@ struct JishuReview {
         await client.logReviewEvent(appId: appId, eventType: "rating_given", platform: platform, rating: rating)
 
         if rating < config.ratingThreshold && config.captureFeedbackOnNegative {
-            let feedback = response.feedbackMessage ?? ""
-            if !feedback.isEmpty {
-                await client.sendReviewFeedback(appId: appId, body: feedback)
+            let prompt = config.feedbackPrompt.isEmpty ? "What could we improve?" : config.feedbackPrompt
+            let feedbackText = await handler.presentFeedbackPrompt(prompt: prompt)
+            if let text = feedbackText, !text.isEmpty {
+                await client.sendReviewFeedback(appId: appId, body: text)
             }
         }
 
