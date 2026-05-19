@@ -1,10 +1,3 @@
-//
-//  App_ExampleApp.swift
-//  App Example
-//
-//  Created by Jeremie Berduck on 24/3/26.
-//
-
 import SwiftUI
 import Jishu
 import UIKit
@@ -14,6 +7,7 @@ struct App_ExampleApp: App {
     @Environment(\.scenePhase) private var scenePhase
     private let isConfigured: Bool
     @State private var didTrackLaunch = false
+    @State private var reviewPresenter = JishuReviewPresenter()
 
     init() {
         guard let config = AppConfiguration.load() else {
@@ -34,6 +28,7 @@ struct App_ExampleApp: App {
         WindowGroup {
             if isConfigured {
                 ContentView()
+                    .jishuReviewSheet(presenter: reviewPresenter)
                     .task {
                         await trackLaunchIfPossible()
                     }
@@ -52,14 +47,12 @@ struct App_ExampleApp: App {
     @MainActor
     private func trackLaunchIfPossible() async {
         guard !didTrackLaunch else { return }
-        guard let activeScene = UIApplication.shared.connectedScenes
-            .compactMap({ $0 as? UIWindowScene })
-            .first(where: { $0.activationState == .foregroundActive }) else {
-            return
-        }
-
         didTrackLaunch = true
-        await Jishu.trackLaunch(in: activeScene)
+        Jishu.reviewUIHandler = reviewPresenter
+        let scene = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first
+        await Jishu.trackLaunch(in: scene)
     }
 }
 

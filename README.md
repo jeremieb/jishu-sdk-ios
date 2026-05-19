@@ -2,9 +2,10 @@
 
 ![github package](https://github.com/user-attachments/assets/161cb128-4312-4dd2-b69c-a47698ee8096)
 
-A lightweight Swift package for [Jishu](https://jishu.page) — check promo access grants, send contact form messages, collect feature proposals, and prompt users for App Store reviews from iOS apps.
+A lightweight Swift package for [Jishu](https://jishu.page) — check promo access grants, send contact form messages, collect feature proposals, and prompt users for App Store reviews.
 
-- **Minimum platform:** iOS 15
+- **Current version:** `0.1.5`
+- **Platforms:** iOS 18+, watchOS 11+, visionOS 2+, macOS 15+
 - **Swift:** 6.0+
 
 ---
@@ -117,7 +118,7 @@ let result = try await Jishu.checkAccess(externalUserId: currentUser.id)
 
 ### 3. Add feedback in your app
 
-Once the SDK is configured, you can call the public feedback endpoints from any `ObservableObject`, `ViewModel`, or other async context. The SDK automatically uses the configured `appId` and a stable device-scoped voter token.
+Once the SDK is configured, you can call the public feedback endpoints from any `ViewModel` or other async context. The SDK automatically uses the configured `appId` and a stable device-scoped voter token.
 
 If you want to expose feature requests in your UI, see the [Feature feedback](#feature-feedback) section below for a complete example.
 
@@ -151,9 +152,9 @@ do {
 | `body` | `String` | Yes | Max 5 000 characters |
 | `senderName` | `String?` | No | Displayed in the dashboard message list |
 | `subject` | `String?` | No | Shown as the message subject line |
-| `userId` | `String?` | No | Automatically filled with `Jishu.displayUserID` when `nil`. Lets the app owner add this sender to a promo grant directly from the dashboard. |
+| `userId` | `String?` | No | Automatically filled with `Jishu.displayUserID` when `nil`. Lets you add this sender to a promo grant directly from the dashboard. |
 
-The SDK automatically includes `platform: "ios"`, `osName`, `osVersion`, and `deviceName` in every contact message request. `deviceName` carries the raw Apple hardware identifier such as `iPhone17,1`; the Jishu backend resolves that into a friendly marketing name for the dashboard.
+The SDK automatically includes the current platform (`ios`, `watchos`, `visionos`, or `macos`), `osVersion`, and `deviceName` in every contact message request. `deviceName` carries the raw Apple hardware identifier such as `iPhone17,1`; the Jishu backend resolves that into a friendly marketing name for the dashboard.
 
 ```swift
 // All fields
@@ -257,17 +258,7 @@ let created = try await Jishu.submitProposal(
 let updatedVoteCount = try await Jishu.vote(on: created)
 ```
 
-The feedback endpoints send these metadata fields automatically:
-
-- `osName` — for example `iOS`
-- `osVersion` — for example `18.3.2`
-- `deviceName` — raw Apple hardware identifier such as `iPhone17,1`
-
-The Jishu backend resolves `deviceName` into a friendly marketing name for dashboard display, so the SDK does not bundle a local device-name lookup table.
-
 ### Typical app integration
-
-The simplest integration is:
 
 1. Load proposals when the screen opens with `Jishu.fetchProposals()`.
 2. Submit a new idea with `Jishu.submitProposal(title:description:)`.
@@ -289,7 +280,6 @@ final class FeedbackViewModel: ObservableObject {
     func load() async {
         isLoading = true
         defer { isLoading = false }
-
         do {
             proposals = try await Jishu.fetchProposals()
             errorMessage = nil
@@ -345,7 +335,6 @@ public static func vote(on proposal: JishuProposal) async throws -> Int
 ### Behavior notes
 
 - `submitProposal` and `vote(on:)` use a stable device-scoped voter token managed by the SDK.
-- Proposal submissions and votes include `osName`, `osVersion`, and the raw Apple hardware identifier in `deviceName`.
 - The feedback endpoints are public and rate-limited by the backend.
 - Duplicate votes from the same device are ignored by the server.
 - The SDK retries once on transport failures or 5xx responses, matching the contact form behavior.
@@ -368,9 +357,9 @@ The review prompt feature intercepts users before they reach the App Store, lets
 
 ### How it works
 
-1. SDK shows your customisable star-rating dialog.
-2. Rating ≥ threshold (default 4) → triggers `SKStoreReviewController` (native iOS prompt).
-3. Rating < threshold (and `captureFeedbackOnNegative` is on) → shows a follow-up text input and sends the feedback silently to your **User Messages** inbox.
+1. SDK shows a star-rating sheet (1–5).
+2. Rating ≥ threshold (default 4) → triggers `SKStoreReviewController` (native App Store prompt).
+3. Rating < threshold (and `captureFeedbackOnNegative` is on) → sends the feedback silently to your **User Messages** inbox.
 4. All events (shown, dismissed, rating_given, native_requested, feedback_sent) are logged to the Jishu dashboard under **Reviews → Analytics**.
 
 ### Dashboard setup
@@ -383,27 +372,40 @@ Go to your app in the Jishu dashboard → **Reviews** tab. Configure:
 - **Cooldown days / Max prompts per device** — prevents over-prompting.
 - **Rating threshold** — ratings at or above this value go to the native dialog; below go to feedback capture.
 
-### Auto mode — `trackLaunch`
+### Wiring the SwiftUI sheet
 
-Call once per cold app launch. The SDK increments the launch counter, fetches the remote config (cached for 1 hour), and shows the prompt when all eligibility conditions are met.
+The SDK ships a ready-made presenter and view for the rating sheet. Add two things to your app entry point:
 
-Place it in your SwiftUI `.task` or `AppDelegate` — **not** in `sceneDidBecomeActive` or `onAppear`, which fire on every foreground transition:
+1. `@State private var reviewPresenter = JishuReviewPresenter()` — owns the sheet state.
+2. `.jishuReviewSheet(presenter: reviewPresenter)` — attaches the sheet to your root view.
+
+Then, in the same `.task` that calls `trackLaunch`, assign the presenter to `Jishu.reviewUIHandler` **before** the `trackLaunch` call so the SDK uses it from the very first eligible launch.
 
 ```swift
-// SwiftUI @main
+// iOS / visionOS
 @main
 struct MyApp: App {
+    @State private var reviewPresenter = JishuReviewPresenter()
     @State private var didTrackLaunch = false
+
+    init() {
+        Jishu.configure(
+            apiToken: "YOUR_API_TOKEN",
+            appId: "YOUR_APP_ID"
+        )
+    }
 
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .jishuReviewSheet(presenter: reviewPresenter)
                 .task {
                     guard !didTrackLaunch else { return }
                     didTrackLaunch = true
+                    Jishu.reviewUIHandler = reviewPresenter   // must come first
                     let scene = UIApplication.shared.connectedScenes
                         .compactMap { $0 as? UIWindowScene }
-                        .first(where: { $0.activationState == .foregroundActive })
+                        .first
                     await Jishu.trackLaunch(in: scene)
                 }
         }
@@ -411,25 +413,61 @@ struct MyApp: App {
 }
 ```
 
+```swift
+// watchOS
+@main
+struct MyWatchApp: App {
+    @State private var reviewPresenter = JishuReviewPresenter()
+
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+                .jishuReviewSheet(presenter: reviewPresenter)
+                .task {
+                    Jishu.reviewUIHandler = reviewPresenter
+                    await Jishu.trackLaunch()
+                }
+        }
+    }
+}
+```
+
+> **Why `.first` and not `.first(where: { $0.activationState == .foregroundActive })`?**
+> At `.task` time the scene is typically `.foregroundInactive`, so filtering for `.foregroundActive` silently drops the scene and the StoreKit prompt never fires. Use `.first` unconditionally on a single-window app.
+
+The rating sheet is a compact bottom sheet with five numbered SF Symbol buttons and localised labels ("Terrible" → "Great"). Labels are looked up from the SDK's own bundle so they pick up any language the user's device is set to, as long as a translation exists. To add a language, open `Sources/Jishu/Resources/Localizable.xcstrings` and add your translations alongside the English entries.
+
+### Auto mode — `trackLaunch`
+
+Call once per cold app launch. The SDK increments the launch counter, fetches the remote config (cached for 1 hour), and shows the prompt when all eligibility conditions are met.
+
+Place it in your SwiftUI `.task` **not** in `sceneDidBecomeActive` or `onAppear`, which fire on every foreground transition. Use a `didTrackLaunch` guard to prevent double-calls when the scene phase changes.
+
 ### Manual mode — `requestReviewIfEligible`
 
 Use when `triggerMode` is set to `"manual"` in the dashboard. Call at a meaningful moment in your app (e.g. after a successful export, after the user completes a milestone). The SDK still enforces `cooldownDays` and `maxPromptsPerDevice`.
 
 ```swift
-// After a milestone
+// iOS / visionOS
 let shown = await Jishu.requestReviewIfEligible(in: windowScene)
-if shown {
-    // prompt was presented — avoid showing other UI on top
-}
+
+// watchOS
+let shown = await Jishu.requestReviewIfEligible()
 ```
 
-The method always records the launch (sets install date on first call and increments launch count), so you do not need a separate `trackLaunch` call in manual mode.
+`requestReviewIfEligible` always records the launch (sets install date on first call and increments launch count), so you do not need a separate `trackLaunch` call in manual mode.
 
-> **Note:** Unlike `trackLaunch`, manual triggers always fetch the review config fresh from the server rather than using the local cache. This means dashboard changes (enabling the review, updating the prompt text) take effect immediately the next time the button is tapped, without waiting for the 1-hour cache to expire.
+> **Note:** Manual triggers always fetch the review config fresh from the server rather than using the local cache. This means dashboard changes take effect immediately the next time the method is called, without waiting for the 1-hour cache to expire.
+
+### watchOS
+
+watchOS has no `UIAlertController` fallback. If `Jishu.reviewUIHandler` is nil when `trackLaunch()` or `requestReviewIfEligible()` runs on watchOS, the prompt is silently skipped. Always set the presenter before calling either method.
+
+The sheet on watchOS shows the five SF Symbol buttons without caption labels to fit the smaller screen. The StoreKit native prompt is not triggered on watchOS (no `UIWindowScene`).
 
 ### Custom UI
 
-By default the SDK shows a `UIAlertController` star-rating dialog. To match your app's design, assign a `JishuReviewUIHandler` before calling `trackLaunch` or `requestReviewIfEligible`:
+`JishuReviewPresenter` covers most use cases. If you need a fully custom design, implement `JishuReviewUIHandler` directly:
 
 ```swift
 Jishu.reviewUIHandler = MyReviewPresenter()
@@ -444,9 +482,7 @@ public protocol JishuReviewUIHandler: AnyObject {
 }
 ```
 
-Your implementation receives the `promptTitle` and `promptQuestion` strings from the dashboard config and must return a `JishuReviewResponse`:
-
-#### `JishuReviewResponse`
+Your implementation receives the `promptTitle` and `promptQuestion` strings from the dashboard and must return a `JishuReviewResponse`:
 
 ```swift
 public struct JishuReviewResponse: Sendable {
@@ -458,28 +494,36 @@ public struct JishuReviewResponse: Sendable {
 
 The SDK uses `rating` to decide whether to trigger the native dialog or capture feedback. You do not need to call any SDK method from within your handler — just return the struct.
 
+> **StoreKit timing:** If you implement a custom sheet, resume the continuation only after the sheet dismissal animation has fully completed. Resuming too early (before the sheet is off-screen) can cause `SKStoreReviewController` to be silently suppressed. A ~400 ms delay after `isPresented = false` is sufficient. `JishuReviewPresenter` handles this for you.
+
 ### Public API
 
 ```swift
-// Auto mode — call once per cold launch
+// iOS / visionOS — auto mode
 @MainActor
 public static func trackLaunch(in scene: UIWindowScene? = nil) async
 
-// Manual mode — call at a meaningful moment
+// iOS / visionOS — manual mode
 @MainActor @discardableResult
 public static func requestReviewIfEligible(in scene: UIWindowScene? = nil) async -> Bool
 
-// Custom UI handler (set before trackLaunch / requestReviewIfEligible)
+// watchOS — auto mode
+@MainActor
+public static func trackLaunch() async
+
+// watchOS — manual mode
+@MainActor @discardableResult
+public static func requestReviewIfEligible() async -> Bool
+
+// Custom UI handler — set before trackLaunch / requestReviewIfEligible
 public static weak var reviewUIHandler: (any JishuReviewUIHandler)?
 ```
 
 ### Notes
 
-- `trackLaunch` and `requestReviewIfEligible` are no-ops if `Jishu.configure(...)` has not been called.
-- If the review config cannot be fetched from the network during a **manual** trigger, the SDK skips the prompt so the live dashboard settings remain authoritative. The auto `trackLaunch` path also does not show a prompt when the config is unavailable.
-- Pass a non-nil `UIWindowScene` for the prompt to appear. Passing `nil` skips the UI presentation silently.
+- Both `trackLaunch` and `requestReviewIfEligible` are no-ops if `Jishu.configure(...)` has not been called.
 - Review feedback messages appear in **User Messages** with the label **Review Feedback** and no email address. The Reply button is hidden for these entries.
-- When running in `.verbose` mode, the console will log the reason a prompt was skipped (e.g. `💬 [Jishu] Review prompt skipped — cooldown active (0/90 days elapsed)`).
+- With `debugLevel: .verbose`, every launch prints a full eligibility status block (see [Debug logging](#debug-logging)).
 
 ---
 
@@ -521,39 +565,61 @@ Pass `debugLevel` to `configure()` to control what the SDK prints to the console
 | Level | What is printed |
 |-------|-----------------|
 | `.default` | Errors (`❌`) and retry attempts (`🔄`) only. |
-| `.verbose` | Everything: SDK configuration, every outgoing request, response status, formatted response body, retries, and errors. |
+| `.verbose` | Everything: configuration, every request and response, review eligibility on each launch, retries, and errors. |
 
 ```swift
-// Errors and retries only (default — same as omitting the parameter)
-Jishu.configure(
-    apiToken: "YOUR_API_TOKEN",
-    appId: "YOUR_APP_ID"
-)
+// Errors and retries only (default)
+Jishu.configure(apiToken: "YOUR_API_TOKEN", appId: "YOUR_APP_ID")
 
-// Full request/response trace
-Jishu.configure(
-    apiToken: "YOUR_API_TOKEN",
-    appId: "YOUR_APP_ID",
-    debugLevel: .verbose
-)
+// Full trace
+Jishu.configure(apiToken: "YOUR_API_TOKEN", appId: "YOUR_APP_ID", debugLevel: .verbose)
 ```
 
 ### Verbose output format
-
-Each log line is prefixed with a distinct emoji so you can scan the console at a glance:
 
 | Prefix | Meaning |
 |--------|---------|
 | `⚙️ [Jishu]` | SDK configured — printed once at startup |
 | `🚀 [Jishu]` | Outgoing request (`METHOD url`) |
 | `✅ [Jishu]` | Successful response (2xx) |
-| `⚠️ [Jishu]` | Non-2xx response (4xx/5xx status line) |
+| `⚠️ [Jishu]` | Non-2xx response (4xx/5xx) |
 | `📦 [Jishu]` | Response body — pretty-printed JSON |
+| `⭐️ [Jishu]` | Review eligibility status — printed on every `trackLaunch` call |
+| `💬 [Jishu]` | General informational message |
 | `🔄 [Jishu]` | Retry attempt (also printed in `.default` mode) |
-| `❌ [Jishu]` | Error — HTTP failure or transport error (also printed in `.default` mode) |
-| `💬 [Jishu]` | Informational — e.g. why a review prompt was skipped, config fetch fallback |
+| `❌ [Jishu]` | Error (also printed in `.default` mode) |
 
-Example `.verbose` output for a successful access check:
+### Review eligibility output
+
+On every `trackLaunch` call, `.verbose` mode prints a status block showing each condition's current value, its target, and how many launches or days remain. This makes it easy to verify your dashboard config is working as expected during development.
+
+Not yet eligible (AND mode):
+```
+⭐️ [Jishu] Review status — launch #3:
+⭐️ [Jishu]   launches   3 / 5  (2 to go)
+⭐️ [Jishu]   days       8 / 14  (6 to go)
+⭐️ [Jishu]   cooldown   never prompted  ✓
+⭐️ [Jishu]   prompts    0 / 3
+⭐️ [Jishu]   → not eligible — waiting on launches (2 to go) + days (6 to go)
+```
+
+Eligible:
+```
+⭐️ [Jishu] Review status — launch #5:
+⭐️ [Jishu]   launches   5 / 5  ✓
+⭐️ [Jishu]   days       14 / 14  ✓
+⭐️ [Jishu]   cooldown   never prompted  ✓
+⭐️ [Jishu]   prompts    0 / 3
+⭐️ [Jishu]   → eligible — showing prompt
+```
+
+In cooldown after a previous prompt:
+```
+⭐️ [Jishu]   cooldown   12 / 30 days  (18 to go)
+⭐️ [Jishu]   → not eligible — cooldown (18 days remaining)
+```
+
+### Example verbose output (access check)
 
 ```
 ⚙️ [Jishu] Configured — server: production | appId: abc123 | debugLevel: verbose
@@ -569,14 +635,7 @@ Example `.verbose` output for a successful access check:
 }
 ```
 
-Example `.default` output (server error with retry):
-
-```
-🔄 [Jishu] Server error 503, retrying https://jishu.page/api/v1/mobile/entitlements/check
-❌ [Jishu] Server error 503 — no retries left
-```
-
-> **Tip:** Use `.verbose` during development and staging smoke tests. Switch to `.default` (or omit the parameter) in production to keep your logs quiet unless something goes wrong.
+> **Tip:** Use `.verbose` during development and staging smoke tests. Switch to `.default` (or omit the parameter) in production builds.
 
 ---
 
@@ -679,7 +738,7 @@ The package is versioned via **git tags**. Swift Package Manager requires a full
 ### Checklist before tagging
 
 - [ ] Bump `public static let version` in `Jishu.swift` to match the new tag.
-- [ ] Update this README's **Current version** badge at the top.
+- [ ] Update this README's **Current version** field at the top.
 - [ ] Ensure `swift build` and `swift test` both pass with zero errors.
 - [ ] Commit all changes.
 
@@ -741,4 +800,4 @@ To switch back to the published version later, remove the local package and re-a
 
 ### Integration test against staging
 
-Follow the [Staging smoke test](#staging-smoke-test) section above. Configure the SDK with `debugLevel: .verbose` to see the full request/response cycle — including the pretty-printed JSON body for every API call — in the Xcode console.
+Follow the [Staging smoke test](#staging-smoke-test) section above. Configure the SDK with `debugLevel: .verbose` to see the full request/response cycle — including the pretty-printed JSON body for every API call and the review eligibility block on launch — in the Xcode console.

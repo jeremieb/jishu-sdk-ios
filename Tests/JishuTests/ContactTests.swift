@@ -257,7 +257,7 @@ struct ContactTests {
         #expect(decoded.senderEmail == "alice@example.com")
         #expect(decoded.subject == "Hello")
         #expect(decoded.body == "World")
-        #expect(decoded.platform == "ios")
+        #expect(decoded.platform.isEmpty == false)
         #expect(decoded.osName.isEmpty == false)
         #expect(decoded.osVersion.isEmpty == false)
         #expect(decoded.deviceName.isEmpty == false)

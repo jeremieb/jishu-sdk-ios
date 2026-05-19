@@ -46,6 +46,12 @@ struct JishuLogger: Sendable {
         print("💬 [Jishu] \(message())")
     }
 
+    /// ⭐️  Verbose only — review eligibility status line.
+    func review(_ message: @autoclosure () -> String) {
+        guard level == .verbose else { return }
+        print("⭐️ [Jishu] \(message())")
+    }
+
     /// 📦  Verbose only — pretty-printed JSON response body.
     func responseBody(_ data: Data) {
         guard level == .verbose, !data.isEmpty else { return }
