@@ -17,8 +17,14 @@ public enum Jishu {
 
     /// Optional custom UI handler for the review prompt.
     ///
-    /// Assign before calling ``trackLaunch(in:)``. When `nil`, the SDK presents a
-    /// `UIAlertController`-based star rating dialog.
+    /// The recommended integration is ``JishuReviewPresenter`` combined with the
+    /// ``SwiftUI/View/jishuReviewSheet(presenter:)`` modifier — this replaces all manual
+    /// boilerplate with a single modifier on your root view.
+    ///
+    /// When `nil` on iOS/visionOS the SDK falls back to a `UIAlertController` dialog.
+    /// On watchOS there is no fallback; a handler **must** be set or the prompt is skipped.
+    ///
+    /// Assign before calling ``trackLaunch(in:)`` (or ``trackLaunch()`` on watchOS).
     /// - Note: Declared `nonisolated(unsafe)` to match `_configuration` and `_client`
     ///   (Swift 6 strict concurrency — caller is responsible for setting this once at startup).
     nonisolated(unsafe) public static weak var reviewUIHandler: (any JishuReviewUIHandler)?
@@ -171,7 +177,8 @@ public enum Jishu {
         guard let reviewConfig = try? await client.fetchReviewConfig(appId: config.appId, store: _reviewStore),
               reviewConfig.triggerMode == "auto" else { return }
 
-        guard await JishuReview.isEligible(config: reviewConfig, store: _reviewStore, appId: config.appId) else { return }
+        let log = JishuLogger(level: config.debugLevel)
+        guard await JishuReview.logAndCheckEligibility(config: reviewConfig, store: _reviewStore, appId: config.appId, log: log) else { return }
 
         _ = await JishuReview.runPromptFlow(
             config: reviewConfig,
@@ -245,6 +252,91 @@ public enum Jishu {
             appId: config.appId,
             uiHandler: reviewUIHandler,
             scene: scene
+        )
+    }
+#endif
+
+#if os(watchOS)
+    /// Track a cold app launch and, when `triggerMode` is `"auto"`, show the review prompt
+    /// if eligibility conditions are met.
+    ///
+    /// Call once per cold start. Set ``reviewUIHandler`` before calling this — there is no
+    /// fallback UI on watchOS.
+    @MainActor
+    public static func trackLaunch() async {
+        guard let client = _client, let config = _configuration else { return }
+        await _reviewStore.setInstallDateIfNeeded(appId: config.appId)
+        await _reviewStore.incrementLaunchCount(appId: config.appId)
+
+        guard let reviewConfig = try? await client.fetchReviewConfig(appId: config.appId, store: _reviewStore),
+              reviewConfig.triggerMode == "auto" else { return }
+
+        let log = JishuLogger(level: config.debugLevel)
+        guard await JishuReview.logAndCheckEligibility(config: reviewConfig, store: _reviewStore, appId: config.appId, log: log) else { return }
+
+        _ = await JishuReview.runPromptFlow(
+            config: reviewConfig,
+            store: _reviewStore,
+            client: client,
+            appId: config.appId,
+            uiHandler: reviewUIHandler
+        )
+    }
+
+    /// Manually trigger the review flow at a meaningful moment in your app.
+    ///
+    /// The SDK still respects `cooldownDays` and `maxPromptsPerDevice`.
+    /// Use this when `triggerMode` is `"manual"`.
+    ///
+    /// - Returns: `true` if the prompt was shown.
+    @MainActor
+    @discardableResult
+    public static func requestReviewIfEligible() async -> Bool {
+        guard let client = _client, let config = _configuration else {
+            JishuLogger(level: .default).error("requestReviewIfEligible called before configure()")
+            return false
+        }
+        let log = JishuLogger(level: config.debugLevel)
+
+        await _reviewStore.setInstallDateIfNeeded(appId: config.appId)
+        await _reviewStore.incrementLaunchCount(appId: config.appId)
+        await _reviewStore.invalidateConfigCache(appId: config.appId)
+
+        let reviewConfig: ReviewConfig
+        do {
+            reviewConfig = try await client.fetchReviewConfig(appId: config.appId, store: _reviewStore)
+        } catch {
+            log.info("Could not fetch review config (\(error.localizedDescription)) — skipping prompt")
+            return false
+        }
+
+        guard reviewConfig.enabled else {
+            log.info("Review prompt is disabled in dashboard config")
+            return false
+        }
+        let promptCount = await _reviewStore.promptCount(appId: config.appId)
+        guard promptCount < reviewConfig.maxPromptsPerDevice else {
+            log.info("Review prompt skipped — maxPromptsPerDevice (\(reviewConfig.maxPromptsPerDevice)) reached")
+            return false
+        }
+        if let lastInterval = await _reviewStore.lastPromptDate(appId: config.appId) {
+            let daysSince = Calendar.current.dateComponents(
+                [.day],
+                from: Date(timeIntervalSince1970: lastInterval),
+                to: Date()
+            ).day ?? 0
+            guard daysSince >= reviewConfig.cooldownDays else {
+                log.info("Review prompt skipped — cooldown active (\(daysSince)/\(reviewConfig.cooldownDays) days elapsed)")
+                return false
+            }
+        }
+
+        return await JishuReview.runPromptFlow(
+            config: reviewConfig,
+            store: _reviewStore,
+            client: client,
+            appId: config.appId,
+            uiHandler: reviewUIHandler
         )
     }
 #endif

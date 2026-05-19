@@ -122,7 +122,7 @@ struct JishuClient: Sendable {
         let meta = deviceMetaInfo()
         request.httpBody = try JSONEncoder().encode(ReviewFeedbackBody(
             body: body,
-            platform: "ios",
+            platform: currentPlatform(),
             osName: meta.osName,
             osVersion: meta.osVersion,
             deviceName: meta.deviceName
@@ -260,7 +260,7 @@ struct JishuClient: Sendable {
             subject: message.subject,
             body: message.body,
             userId: message.userId,// filled by sanitized(deviceUserID:)
-            platform: "ios",
+            platform: currentPlatform(),
             osName: meta.osName,
             osVersion: meta.osVersion,
             deviceName: meta.deviceName
@@ -393,7 +393,7 @@ struct JishuClient: Sendable {
 
 private struct EntitlementCheckRequest: Encodable {
     let appId: String
-    let platform: String = "ios"
+    let platform: String = currentPlatform()
     let externalUserId: String?
     let deviceId: String
     let environment: String?

@@ -53,17 +53,11 @@ final class MainViewModel: ObservableObject {
         isRequestingReview = true
 
         Task {
-            let activeScene = UIApplication.shared.connectedScenes
+            let scene = UIApplication.shared.connectedScenes
                 .compactMap { $0 as? UIWindowScene }
-                .first(where: { $0.activationState == .foregroundActive })
+                .first
 
-            guard let activeScene else {
-                isRequestingReview = false
-                reviewRequestMessage = "No active window scene found, cannot present review UI."
-                return
-            }
-
-            let shown = await Jishu.requestReviewIfEligible(in: activeScene)
+            let shown = await Jishu.requestReviewIfEligible(in: scene)
 
             isRequestingReview = false
             reviewRequestMessage = shown

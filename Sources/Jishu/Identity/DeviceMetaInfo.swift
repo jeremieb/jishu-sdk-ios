@@ -3,19 +3,37 @@ import Darwin
 
 func deviceMetaInfo() -> (osName: String, osVersion: String, deviceName: String) {
     let version = ProcessInfo.processInfo.operatingSystemVersion
-    #if canImport(UIKit)
-    let osName = "iOS"
-    #else
-    let osName = "macOS"
-    #endif
     let osVersion = "\(version.majorVersion).\(version.minorVersion).\(version.patchVersion)"
-
     let identifier = hardwareIdentifier()
     return (
-        osName: osName.isEmpty ? "iOS" : osName,
+        osName: currentOSName(),
         osVersion: osVersion,
         deviceName: identifier.isEmpty ? "unknown" : identifier
     )
+}
+
+func currentPlatform() -> String {
+    #if os(watchOS)
+    return "watchos"
+    #elseif os(visionOS)
+    return "visionos"
+    #elseif canImport(UIKit)
+    return "ios"
+    #else
+    return "macos"
+    #endif
+}
+
+private func currentOSName() -> String {
+    #if os(watchOS)
+    return "watchOS"
+    #elseif os(visionOS)
+    return "visionOS"
+    #elseif canImport(UIKit)
+    return "iOS"
+    #else
+    return "macOS"
+    #endif
 }
 
 private func hardwareIdentifier() -> String {

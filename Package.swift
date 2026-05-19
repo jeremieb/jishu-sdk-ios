@@ -3,9 +3,12 @@ import PackageDescription
 
 let package = Package(
     name: "Jishu",
+    defaultLocalization: "en",
     platforms: [
-        .iOS(.v15),
-        .macOS(.v12)
+        .iOS(.v18),
+        .watchOS(.v11),
+        .visionOS(.v2),
+        .macOS(.v15)
     ],
     products: [
         .library(
@@ -16,6 +19,7 @@ let package = Package(
     targets: [
         .target(
             name: "Jishu",
+            resources: [.process("Resources")],
             linkerSettings: [.linkedFramework("StoreKit")]
         ),
         .testTarget(
