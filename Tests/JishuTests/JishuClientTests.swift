@@ -135,6 +135,33 @@ struct JishuClientTests {
         #expect(result.matchType == .user)
     }
 
+    @Test("Entitlement request encodes Apple platform")
+    func entitlementRequestEncodesApplePlatform() async throws {
+        var capturedRequest: URLRequest?
+        MockURLProtocol.requestHandler = { request in
+            capturedRequest = request
+            return (makeHTTPResponse(status: 200), successJSON)
+        }
+        let client = makeClient()
+        _ = try await client.checkAccess(externalUserId: "user_1", deviceId: "device_1")
+
+        let bodyData = try requestBodyData(from: capturedRequest)
+        struct DecodedBody: Decodable {
+            let appId: String
+            let platform: String
+            let externalUserId: String?
+            let deviceId: String
+            let environment: String?
+        }
+
+        let decoded = try JSONDecoder().decode(DecodedBody.self, from: bodyData)
+        #expect(decoded.appId == "app_test")
+        #expect(decoded.platform == "ios")
+        #expect(decoded.externalUserId == "user_1")
+        #expect(decoded.deviceId == "device_1")
+        #expect(decoded.environment == "staging")
+    }
+
     @Test("Throws httpError on 401 without retrying")
     func throws401WithoutRetry() async throws {
         var callCount = 0
