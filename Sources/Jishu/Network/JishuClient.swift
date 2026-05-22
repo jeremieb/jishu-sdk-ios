@@ -393,7 +393,7 @@ struct JishuClient: Sendable {
 
 private struct EntitlementCheckRequest: Encodable {
     let appId: String
-    let platform: String = currentPlatform()
+    let platform: String = entitlementPlatform()
     let externalUserId: String?
     let deviceId: String
     let environment: String?

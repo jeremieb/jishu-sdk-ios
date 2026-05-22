@@ -43,14 +43,14 @@ Jishu promo access lets you grant specific users or devices early or exclusive a
    ```
    https://github.com/jeremieberduck/jishu-sdk-ios
    ```
-3. Select **Up to Next Major Version** starting from `0.2.0`.
+3. Select **Up to Next Major Version**.
 4. Add **Jishu** to your app target.
 
 ### Swift Package Manager (Package.swift)
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/jeremieberduck/jishu-sdk-ios", from: "0.2.0"),
+    .package(url: "https://github.com/jeremieberduck/jishu-sdk-ios", from: "<latest-tag>"),
 ],
 targets: [
     .target(
@@ -744,8 +744,8 @@ The package is versioned via **git tags**. Swift Package Manager requires a full
 ### Tag and push
 
 ```bash
-git tag 0.2.0
-git push origin 0.2.0
+git tag <version>
+git push origin <version>
 ```
 
 Or push all local tags at once:

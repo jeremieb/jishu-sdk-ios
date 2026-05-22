@@ -24,6 +24,10 @@ func currentPlatform() -> String {
     #endif
 }
 
+func entitlementPlatform() -> String {
+    "ios"
+}
+
 private func currentOSName() -> String {
     #if os(watchOS)
     return "watchOS"
